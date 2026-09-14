@@ -1,0 +1,514 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #000;
+  --panel: #121216;
+  --border: rgba(255, 255, 255, 0.09);
+  --text: #f5f5f7;
+  --muted: #9ca3af;
+  --accent-1: #833ab4;
+  --accent-2: #fc466b;
+  --accent-3: #f7b733;
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  overscroll-behavior: none;
+}
+
+#app {
+  height: 100%;
+}
+
+/* ---------- Reels ---------- */
+
+.reels-page {
+  position: relative;
+  height: 100dvh;
+  background: var(--bg);
+}
+
+.reels-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(12px, env(safe-area-inset-top)) 16px 12px;
+  background: linear-gradient(rgba(0, 0, 0, 0.65), transparent);
+  pointer-events: none;
+}
+
+.reels-header > * {
+  pointer-events: auto;
+}
+
+.brand {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2), var(--accent-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(20, 20, 24, 0.6);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+  font-size: 17px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+
+.icon-btn:hover {
+  background: rgba(45, 45, 52, 0.8);
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
+}
+
+.feed {
+  height: 100dvh;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+}
+
+.feed::-webkit-scrollbar {
+  display: none;
+}
+
+.reel {
+  position: relative;
+  height: 100dvh;
+  scroll-snap-align: start;
+  overflow: hidden;
+  background: #000;
+}
+
+.reel-video,
+.reel-image {
+  position: absolute;
+  inset: 5%;
+  width: 90%;
+  height: 90%;
+  object-fit: contain;
+  display: block;
+  transition: transform 0.25s ease;
+}
+
+.reel-video {
+  cursor: pointer;
+}
+
+.rot-180 {
+  transform: rotate(180deg);
+}
+
+.rot-90,
+.rot-270 {
+  /* Swap the box (slide = full viewport) so the rotated media still fits at 90%. */
+  inset: 0;
+  margin: auto;
+  width: 90dvh;
+  height: 90dvw;
+}
+
+.rot-90 {
+  transform: rotate(90deg);
+}
+
+.rot-270 {
+  transform: rotate(270deg);
+}
+
+.play-badge {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 64px;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.reel-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.reel-error small {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+  padding: 0 24px;
+  text-align: center;
+}
+
+.reel-meta {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 22px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 16px;
+  pointer-events: none;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+}
+
+.reel-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reel-duration {
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0;
+  background: #fff;
+  transition: width 0.15s linear;
+}
+
+.feed-state {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.state-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.state-hint {
+  margin: 0;
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+.state-hint code {
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.retry-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  cursor: pointer;
+}
+
+.spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent-2);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Config panel ---------- */
+
+.config-panel {
+  width: min(480px, 100%);
+  text-align: left;
+}
+
+.config-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.config-row {
+  display: flex;
+  gap: 8px;
+}
+
+.config-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.config-input:focus {
+  outline: none;
+  border-color: var(--accent-2);
+}
+
+.config-save {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #fff;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  cursor: pointer;
+}
+
+.config-save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.config-msg {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #4ade80;
+  word-break: break-word;
+}
+
+.config-msg--error {
+  color: #f87171;
+}
+
+/* ---------- Dashboard ---------- */
+
+.dashboard-page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+}
+
+.dash-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.dash-header h1 {
+  font-size: 24px;
+  margin: 0;
+  flex: 1;
+}
+
+.range-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.range-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.range-btn--active {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+}
+
+.dash-error {
+  color: #f87171;
+}
+
+.dash-loading,
+.dash-empty {
+  color: var(--muted);
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stat-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.stat-value {
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.stat-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chart-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  margin-bottom: 20px;
+}
+
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.chart-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.chart-box {
+  position: relative;
+  height: 280px;
+}
+
+.chart-box--tall {
+  height: 380px;
+}
+
+.top-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.top-table th,
+.top-table td {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.top-table th {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cell-name {
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .chart-box {
+    height: 220px;
+  }
+
+  .chart-box--tall {
+    height: 300px;
+  }
+
+  .stat-value {
+    font-size: 22px;
+  }
+}
