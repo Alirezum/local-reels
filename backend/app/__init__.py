@@ -1,0 +1,1 @@
+"""Local Reels FastAPI application."""
