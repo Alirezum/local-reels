@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Local data & media
+data/
+videos/
+.env
+
+# Node / Vite
+node_modules/
+frontend/dist/
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
