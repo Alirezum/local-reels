@@ -1,0 +1,15 @@
+services:
+  local-reels:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      VIDEO_DIR: /data/videos
+      DB_PATH: /data/db/localreel.db
+    volumes:
+      # Put your video files in ./videos on the host (or change the left side).
+      - ./videos:/data/videos:ro
+      - reel-data:/data/db
+
+volumes:
+  reel-data:
