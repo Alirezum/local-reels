@@ -14,8 +14,12 @@ async function handle(res) {
 
 export const api = {
   listVideos: () => fetch('/api/videos').then(handle),
-  randomVideos: (limit) =>
-    fetch(`/api/videos/random${limit ? `?limit=${limit}` : ''}`).then(handle),
+  randomVideos: (limit, order) => {
+    const params = new URLSearchParams()
+    if (limit) params.set('limit', String(limit))
+    params.set('order', order ?? 'weighted')
+    return fetch(`/api/videos/random?${params}`).then(handle)
+  },
   recordWatch: (payload, keepalive = false) =>
     fetch('/api/watch', {
       method: 'POST',

@@ -15,6 +15,7 @@ const reelComps = ref([])
 const videos = ref([])
 const activeIndex = ref(0)
 const muted = ref(localStorage.getItem('lr.muted') !== '0')
+const order = ref(localStorage.getItem('lr.order') === 'random' ? 'random' : 'weighted')
 const loading = ref(true)
 const loadError = ref('')
 const config = ref(null)
@@ -54,10 +55,12 @@ function bindObserver() {
 }
 
 async function fetchBatch() {
-  const fresh = await api.randomVideos(BATCH)
+  const fresh = await api.randomVideos(BATCH, order.value)
   if (!fresh.length) return 0
-  const filtered = fresh.filter((v) => !brokenIds.has(v.id))
-  const pool = filtered.length ? filtered : fresh
+  const recent = new Set(videos.value.slice(-60).map((v) => v.id))
+  let pool = fresh.filter((v) => !brokenIds.has(v.id) && !recent.has(v.id))
+  if (!pool.length) pool = fresh.filter((v) => !brokenIds.has(v.id))
+  if (!pool.length) pool = fresh
   videos.value = [...videos.value, ...pool]
   return pool.length
 }
@@ -122,6 +125,12 @@ function rotateActive() {
   rotations.value = { ...rotations.value, [video.id]: (rotationFor(video) + 90) % 360 }
 }
 
+function toggleOrder() {
+  order.value = order.value === 'weighted' ? 'random' : 'weighted'
+  localStorage.setItem('lr.order', order.value)
+  load() // rebuild the queue under the new strategy
+}
+
 function scrollByOne(delta) {
   const feed = feedEl.value
   if (feed) feed.scrollBy({ top: delta * feed.clientHeight, behavior: 'smooth' })
@@ -134,6 +143,7 @@ function onKeydown(ev) {
   else if (ev.key === ' ') { ev.preventDefault(); reelComps.value[activeIndex.value]?.toggle() }
   else if (ev.key.toLowerCase() === 'm') toggleMute()
   else if (ev.key.toLowerCase() === 'r') rotateActive()
+  else if (ev.key.toLowerCase() === 's') toggleOrder()
 }
 
 async function onConfigSaved() {
@@ -153,6 +163,13 @@ onBeforeUnmount(() => observer?.disconnect())
     <header class="reels-header">
       <h1 class="brand">Local Reels</h1>
       <nav class="header-actions">
+        <button
+          class="icon-btn"
+          :title="order === 'weighted'
+            ? 'Shuffle: showing less-watched first (s) — click for pure random'
+            : 'Shuffle: pure random (s) — click to show less-watched first'"
+          @click="toggleOrder"
+        >{{ order === 'weighted' ? '🌱' : '🎲' }}</button>
         <button class="icon-btn" title="Rotate active (r)" @click="rotateActive">⟳</button>
         <button class="icon-btn" :title="muted ? 'Unmute (m)' : 'Mute (m)'" @click="toggleMute">
           {{ muted ? '🔇' : '🔊' }}

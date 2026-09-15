@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from .schemas import ConfigIn, ConfigOut, VideoOut
 from .scan import sync_directory
+from .stats import SESSIONS_CTE
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 config_router = APIRouter(prefix="/api/config", tags=["config"])
@@ -45,12 +46,66 @@ async def list_videos(request: Request) -> list[VideoOut]:
     return await fetch_present_videos(conn)
 
 
+async def fetch_view_weights(conn: aiosqlite.Connection) -> dict[str, float]:
+    """Per-video discovery weight: less-watched -> higher weight.
+
+    weight = 1 / (1 + view_sessions + watched_minutes / 5). Never-seen media
+    score 1.0; a heavily watched clip scores near 0.
+    """
+    sql = (
+        SESSIONS_CTE
+        + "SELECT video_id, SUM(is_new_view) AS views, "
+        "SUM(duration_watched) AS seconds FROM sessions GROUP BY video_id"
+    )
+    async with conn.execute(sql) as cur:
+        rows = await cur.fetchall()
+    return {
+        r["video_id"]: 1.0 / (1.0 + float(r["views"]) + float(r["seconds"]) / 60.0 / 5.0)
+        for r in rows
+    }
+
+
+def weighted_sample_without_replacement(
+    videos: list[VideoOut], weights: dict[str, float]
+) -> list[VideoOut]:
+    pool = list(videos)
+    remaining = [weights.get(v.id, 1.0) for v in pool]
+    picked: list[VideoOut] = []
+    while pool:
+        total = sum(remaining)
+        if total <= 0:
+            random.shuffle(pool)
+            picked.extend(pool)
+            break
+        r = random.uniform(0, total)
+        acc = 0.0
+        idx = 0
+        for i, w in enumerate(remaining):
+            acc += w
+            if r <= acc:
+                idx = i
+                break
+        else:
+            idx = len(pool) - 1
+        picked.append(pool.pop(idx))
+        remaining.pop(idx)
+    return picked
+
+
 @router.get("/random", response_model=list[VideoOut])
 async def random_videos(
-    request: Request, limit: int | None = Query(default=None, ge=1, le=500)
+    request: Request,
+    limit: int | None = Query(default=None, ge=1, le=500),
+    order: str = Query(default="weighted", pattern="^(weighted|random)$"),
 ) -> list[VideoOut]:
+    conn: aiosqlite.Connection = request.app.state.conn
     videos = await list_videos(request)
-    random.shuffle(videos)
+    if order == "weighted":
+        weights = await fetch_view_weights(conn)
+        random.shuffle(videos)  # so ties among unseen are shuffled fairly
+        videos = weighted_sample_without_replacement(videos, weights)
+    else:
+        random.shuffle(videos)
     return videos[:limit] if limit else videos
 
 
