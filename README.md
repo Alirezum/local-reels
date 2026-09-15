@@ -17,16 +17,21 @@ feed, with accurate stats on what you actually watched.
 - Plays **videos and photos** from any folder, **recursively** (subfolders included)
 - Photos just sit there until you swipe — no auto-advance
 - Autoplay when in view, pause + rewind when out of view, videos loop
-- Random shuffle every session; fresh shuffled batches auto-append as you scroll
-- Tap to play/pause, mute/unmute toggle (remembered), thin progress bar
-- Keyboard: `↑` / `↓` navigate, `Space` play/pause, `m` mute
+- **Discovery shuffle** (default): less-watched media appears more often; toggle 🎲/🌱 (or `s`) for pure random
+- **Folder filter** and **favorites-only** mode in the header (📂 / ♥)
+- **Favorite** (♡/♥) and **hide** (🚫 "don't show again") any reel; hidden items can be un-hidden from the dashboard
+- Tap to play/pause, mute/unmute toggle (remembered), thin progress bar, rotate (⟳ / `r`)
+- Keyboard: `↑` / `↓` navigate, `Space` play/pause, `m` mute, `s` shuffle, `r` rotate
 - Broken/undecodable files are flagged and skipped, the feed keeps going
 
 **Analytics dashboard (`/dashboard`)**
 
 - Cards: total watch time, total views, videos watched, average per view
 - Line chart of daily (or weekly) watch time over 7/30/90 days
-- Bar chart + table of most-watched videos
+- Bar chart + table of most-watched videos, and a **watch-time-by-folder** doughnut
+- **Hidden items** manager (un-hide anything you 🚫'd from the feed)
+- A "view" is one continuous watch session (gaps ≥ 30 s start a new one), so
+  totals and averages aren't inflated by the ~5 s watch-time flushes
 - Watch time is tracked *accurately*: only while the active video is actually
   playing, accounting for pauses, tab switches, and page unload
 
@@ -91,12 +96,16 @@ skipped, and symlinked directories are not followed (no cycles).
 
 | Method | Path                      | Description                                             |
 | ------ | ------------------------- | ------------------------------------------------------- |
-| GET    | `/api/videos`             | All media in the folder + metadata (id, filename, relpath, type, url, duration, size) |
-| GET    | `/api/videos/random`      | Same list, server-shuffled                              |
+| GET    | `/api/videos`             | All media in the folder + metadata (id, filename, relpath, type, url, duration, size, favorite) |
+| GET    | `/api/videos/random`      | Server-shuffled list (`?limit=25&order=weighted\|random&folder=CSM&favorites=true`) |
+| GET    | `/api/videos/folders`     | Top-level folders (incl. `(root)`) with visible counts |
+| POST   | `/api/flags`              | Set `favorite` and/or `blocked` on a video (`{video_id, favorite?, blocked?}`) |
+| GET    | `/api/blocked`            | Hidden (blocked) items, for the dashboard un-hide list |
 | POST   | `/api/watch`              | Record `{video_id, start_time, end_time, duration_watched}` |
-| GET    | `/api/stats/summary`      | Total watch time, total views, distinct videos watched  |
+| GET    | `/api/stats/summary`      | Total watch time, view *sessions*, distinct videos watched |
 | GET    | `/api/stats/top-videos`   | Most watched media (`?limit=10`)                        |
 | GET    | `/api/stats/daily`        | Watch time per day, zero-filled (`?days=30`)            |
+| GET    | `/api/stats/folders`      | Watch time & views grouped by top-level folder (`?days=30`) |
 | GET    | `/api/config`             | Current video directory, exists?, count                 |
 | POST   | `/api/config`             | Change video directory at runtime (`{"video_dir": "…"}`) |
 | GET    | `/videos/{relpath}`       | Stream a video/photo (recursive; HTTP Range / 206 supported) |
@@ -111,8 +120,12 @@ media directory and doubles as the display name and stream key.
 ```sql
 videos(id PK, filename UNIQUE /* rel. POSIX path */, path, type, duration, size, mtime, removed, created_at)
 watch_events(id PK, video_id → videos, start_time, end_time, duration_watched, created_at)
+user_flags(video_id PK → videos, favorite, blocked, updated_at)   -- your hearts & 🚫 (kept separate from the disk scan)
 config(key PK, value)   -- runtime settings, e.g. video_dir
 ```
+
+Flags are keyed by the stable relative-path ID, so they survive rescans; renaming
+or moving a file on disk gives it a new ID (flags and stats start fresh for it).
 
 A lightweight runtime migration adds the `type` column to databases created
 before image support, so existing watch history is preserved across upgrades.
