@@ -46,8 +46,10 @@ body {
   right: 0;
   z-index: 10;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   padding: max(12px, env(safe-area-inset-top)) 16px 12px;
   background: linear-gradient(rgba(0, 0, 0, 0.65), transparent);
   pointer-events: none;
@@ -96,6 +98,49 @@ body {
 
 .icon-btn:active {
   transform: scale(0.92);
+}
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.folder-select {
+  appearance: none;
+  background: rgba(20, 20, 24, 0.72);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  max-width: 60%;
+}
+
+.folder-select option {
+  background: #121216;
+}
+
+.fav-filter-btn {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(20, 20, 24, 0.72);
+  backdrop-filter: blur(8px);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.fav-filter-btn--on {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
 }
 
 .feed {
@@ -195,6 +240,41 @@ body {
   padding: 0 16px;
   pointer-events: none;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+}
+
+.reel-actions {
+  position: absolute;
+  right: 12px;
+  bottom: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  z-index: 5;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.action-btn:active {
+  transform: scale(0.88);
+}
+
+.action-btn--on {
+  color: var(--accent-2);
+  border-color: rgba(252, 70, 107, 0.55);
 }
 
 .reel-name {

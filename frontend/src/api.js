@@ -14,12 +14,22 @@ async function handle(res) {
 
 export const api = {
   listVideos: () => fetch('/api/videos').then(handle),
-  randomVideos: (limit, order) => {
+  randomVideos: (limit, order, filters = {}) => {
     const params = new URLSearchParams()
     if (limit) params.set('limit', String(limit))
     params.set('order', order ?? 'weighted')
+    if (filters.folder) params.set('folder', filters.folder)
+    if (filters.favorites) params.set('favorites', 'true')
     return fetch(`/api/videos/random?${params}`).then(handle)
   },
+  folders: () => fetch('/api/videos/folders').then(handle),
+  setFlags: (videoId, flags) =>
+    fetch('/api/flags', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ video_id: videoId, ...flags }),
+    }).then(handle),
+  blocked: () => fetch('/api/blocked').then(handle),
   recordWatch: (payload, keepalive = false) =>
     fetch('/api/watch', {
       method: 'POST',
@@ -30,6 +40,7 @@ export const api = {
   summary: () => fetch('/api/stats/summary').then(handle),
   topVideos: (limit = 10) => fetch(`/api/stats/top-videos?limit=${limit}`).then(handle),
   daily: (days = 30) => fetch(`/api/stats/daily?days=${days}`).then(handle),
+  folderStats: (days = 30) => fetch(`/api/stats/folders?days=${days}`).then(handle),
   getConfig: () => fetch('/api/config').then(handle),
   setConfig: (videoDir) =>
     fetch('/api/config', {

@@ -11,7 +11,7 @@ const props = defineProps({
   muted: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['state', 'error'])
+const emit = defineEmits(['state', 'error', 'favorite', 'block'])
 
 const videoEl = ref(null)
 const playing = ref(false)
@@ -134,6 +134,18 @@ defineExpose({ toggle })
         {{ formatDuration(video.duration) }}
       </span>
       <span v-else-if="isImage" class="reel-duration">photo</span>
+    </div>
+
+    <div v-if="active && mount && !failed" class="reel-actions">
+      <button
+        class="action-btn"
+        :class="{ 'action-btn--on': video.favorite }"
+        :title="video.favorite ? 'Remove from favorites' : 'Add to favorites'"
+        @click.stop="emit('favorite', video)"
+      >{{ video.favorite ? '♥' : '♡' }}</button>
+      <button class="action-btn" title="Don’t show this again" @click.stop="emit('block', video)">
+        🚫
+      </button>
     </div>
 
     <div v-if="mount && !isImage" class="progress">

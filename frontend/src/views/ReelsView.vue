@@ -21,11 +21,19 @@ const loadError = ref('')
 const config = ref(null)
 const brokenIds = new Set()
 const rotations = ref({}) // video id -> degrees, kept for this browser session only
+const folders = ref([])
+const activeFolder = ref('') // '' = all
+const favoritesOnly = ref(false)
 
 const tracker = useWatchTracker()
 let observer = null
 
 const isEmpty = computed(() => !loading.value && !loadError.value && videos.value.length === 0)
+const filterActive = computed(() => activeFolder.value !== '' || favoritesOnly.value)
+
+function currentFilters() {
+  return { folder: activeFolder.value || undefined, favorites: favoritesOnly.value }
+}
 
 function bindObserver() {
   if (!feedEl.value) return
@@ -55,7 +63,7 @@ function bindObserver() {
 }
 
 async function fetchBatch() {
-  const fresh = await api.randomVideos(BATCH, order.value)
+  const fresh = await api.randomVideos(BATCH, order.value, currentFilters())
   if (!fresh.length) return 0
   const recent = new Set(videos.value.slice(-60).map((v) => v.id))
   let pool = fresh.filter((v) => !brokenIds.has(v.id) && !recent.has(v.id))
@@ -65,12 +73,21 @@ async function fetchBatch() {
   return pool.length
 }
 
+async function loadFolders() {
+  try {
+    folders.value = await api.folders()
+  } catch {
+    folders.value = []
+  }
+}
+
 async function load() {
   loading.value = true
   loadError.value = ''
   try {
     config.value = await api.getConfig()
     videos.value = []
+    await loadFolders()
     if (!(await fetchBatch())) {
       config.value = await api.getConfig() // refresh count/error state
     }
@@ -82,6 +99,22 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+async function setFolder(name) {
+  activeFolder.value = name
+  await load()
+}
+
+async function toggleFavorites() {
+  favoritesOnly.value = !favoritesOnly.value
+  await load()
+}
+
+async function clearFilters() {
+  activeFolder.value = ''
+  favoritesOnly.value = false
+  await load()
 }
 
 let appending = false
@@ -108,6 +141,38 @@ function onReelState({ index, playing }) {
 
 function onReelError(video) {
   brokenIds.add(video.id)
+}
+
+async function onFavorite(video) {
+  const next = !video.favorite
+  videos.value.forEach((v) => {
+    if (v.id === video.id) v.favorite = next
+  })
+  try {
+    await api.setFlags(video.id, { favorite: next })
+  } catch {
+    videos.value.forEach((v) => {
+      if (v.id === video.id) v.favorite = !next
+    })
+  }
+}
+
+async function onBlock(video) {
+  try {
+    await api.setFlags(video.id, { blocked: true })
+  } catch {
+    return
+  }
+  brokenIds.add(video.id)
+  // Remove every slide for this id, then snap the feed onto the next item.
+  videos.value = videos.value.filter((v) => v.id !== video.id)
+  if (activeIndex.value > videos.value.length - 1) activeIndex.value = Math.max(0, videos.value.length - 1)
+  await nextTick()
+  bindObserver()
+  const feed = feedEl.value
+  if (feed) feed.scrollTo({ top: activeIndex.value * feed.clientHeight })
+  tracker.setActive(videos.value[activeIndex.value]?.id ?? null)
+  loadFolders()
 }
 
 function toggleMute() {
@@ -176,6 +241,23 @@ onBeforeUnmount(() => observer?.disconnect())
         </button>
         <RouterLink to="/dashboard" class="icon-btn" title="Dashboard">📊</RouterLink>
       </nav>
+      <div v-if="folders.length > 1 || favoritesOnly" class="filter-bar">
+        <select class="folder-select" :value="activeFolder" @change="setFolder($event.target.value)">
+          <option value="">📂 All folders</option>
+          <option v-for="f in folders" :key="f.name" :value="f.name">
+            {{ f.name }} ({{ f.count }})
+          </option>
+        </select>
+        <button
+          class="fav-filter-btn"
+          :class="{ 'fav-filter-btn--on': favoritesOnly }"
+          title="Show favorites only"
+          @click="toggleFavorites"
+        >♥ Favorites</button>
+        <button v-if="filterActive" class="fav-filter-btn" title="Clear filters" @click="clearFilters">
+          ✕
+        </button>
+      </div>
     </header>
 
     <main v-if="videos.length" ref="feedEl" class="feed">
@@ -191,6 +273,8 @@ onBeforeUnmount(() => observer?.disconnect())
         :muted="muted"
         @state="onReelState"
         @error="onReelError"
+        @favorite="onFavorite"
+        @block="onBlock"
       />
     </main>
 
@@ -203,6 +287,16 @@ onBeforeUnmount(() => observer?.disconnect())
       <p class="state-title">Couldn’t reach the server</p>
       <p class="state-hint">{{ loadError }}</p>
       <button class="retry-btn" @click="load">Retry</button>
+    </div>
+
+    <div v-else-if="filterActive" class="feed-state">
+      <p class="state-title">Nothing matches this filter</p>
+      <p class="state-hint">
+        {{ favoritesOnly && !activeFolder
+          ? 'Tap ♡ on a reel to add it to your favorites.'
+          : 'Try another folder or clear the filter.' }}
+      </p>
+      <button class="retry-btn" @click="clearFilters">Show everything</button>
     </div>
 
     <div v-else class="feed-state">
