@@ -1,4 +1,9 @@
-"""Aggregated watch-time statistics."""
+"""Aggregated watch-time statistics.
+
+The frontend flushes a watch chunk every ~5 s, so raw event rows are *not*
+views. A "view" is one continuous watch session per video: consecutive events
+for the same video less than 30 s apart count as a single view.
+"""
 
 from __future__ import annotations
 
@@ -11,14 +16,36 @@ from .schemas import DailyOut, SummaryOut, TopVideoOut
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 
+VIEW_GAP_SECONDS = 30
+
+# Adds an `is_new_view` flag (1 = start of a watch session) to every event.
+SESSIONS_CTE = f"""
+WITH sessions AS (
+    SELECT
+        video_id,
+        created_at,
+        duration_watched,
+        CASE
+            WHEN LAG(created_at) OVER w IS NULL
+                 OR (julianday(created_at) - julianday(LAG(created_at) OVER w)) * 86400.0
+                    >= {VIEW_GAP_SECONDS}
+            THEN 1
+            ELSE 0
+        END AS is_new_view
+    FROM watch_events
+    WINDOW w AS (PARTITION BY video_id ORDER BY created_at)
+)
+"""
+
 
 @router.get("/summary", response_model=SummaryOut)
 async def summary(request: Request) -> SummaryOut:
     conn: aiosqlite.Connection = request.app.state.conn
     sql = (
-        "SELECT COALESCE(SUM(duration_watched), 0) AS total, "
-        "COUNT(*) AS views, COUNT(DISTINCT video_id) AS videos "
-        "FROM watch_events"
+        SESSIONS_CTE
+        + "SELECT COALESCE(SUM(duration_watched), 0) AS total, "
+        "COALESCE(SUM(is_new_view), 0) AS views, "
+        "COUNT(DISTINCT video_id) AS videos FROM sessions"
     )
     async with conn.execute(sql) as cur:
         row = await cur.fetchone()
@@ -35,10 +62,11 @@ async def top_videos(
 ) -> list[TopVideoOut]:
     conn: aiosqlite.Connection = request.app.state.conn
     sql = (
-        "SELECT e.video_id AS video_id, v.filename AS filename, "
-        "SUM(e.duration_watched) AS watch_seconds, COUNT(*) AS views "
-        "FROM watch_events e JOIN videos v ON v.id = e.video_id "
-        "GROUP BY e.video_id ORDER BY watch_seconds DESC LIMIT ?"
+        SESSIONS_CTE
+        + "SELECT s.video_id AS video_id, v.filename AS filename, "
+        "SUM(s.duration_watched) AS watch_seconds, SUM(s.is_new_view) AS views "
+        "FROM sessions s JOIN videos v ON v.id = s.video_id "
+        "GROUP BY s.video_id ORDER BY watch_seconds DESC LIMIT ?"
     )
     async with conn.execute(sql, (limit,)) as cur:
         rows = await cur.fetchall()
@@ -60,8 +88,9 @@ async def daily(
     conn: aiosqlite.Connection = request.app.state.conn
     since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     sql = (
-        "SELECT date(created_at) AS day, SUM(duration_watched) AS watch_seconds, "
-        "COUNT(*) AS views FROM watch_events WHERE date(created_at) >= ? "
+        SESSIONS_CTE
+        + "SELECT date(created_at) AS day, SUM(duration_watched) AS watch_seconds, "
+        "SUM(is_new_view) AS views FROM sessions WHERE date(created_at) >= ? "
         "GROUP BY day"
     )
     async with conn.execute(sql, (since,)) as cur:
