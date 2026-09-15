@@ -9,6 +9,8 @@ import ConfigPanel from '../components/ConfigPanel.vue'
 const summary = ref(null)
 const topVideos = ref([])
 const daily = ref([])
+const folderStats = ref([])
+const blockedList = ref([])
 const loading = ref(true)
 const error = ref('')
 const rangeDays = ref(30)
@@ -16,8 +18,10 @@ const mode = ref('daily')
 
 let lineChart = null
 let barChart = null
+let folderChart = null
 const lineCanvas = ref(null)
 const barCanvas = ref(null)
+const folderCanvas = ref(null)
 
 const avgPerView = computed(() => {
   if (!summary.value || !summary.value.total_views) return '—'
@@ -110,17 +114,67 @@ function renderBarChart() {
   })
 }
 
+const FOLDER_COLORS = [
+  '#833ab4', '#fc466b', '#f7b733', '#4cc9f0', '#9b5de5',
+  '#f15bb5', '#00bbf9', '#00f5d4', '#fee440', '#e07a5f',
+]
+
+function renderFolderChart() {
+  if (!folderCanvas.value) return
+  folderChart?.destroy()
+  if (!folderStats.value.length) return
+  folderChart = new Chart(folderCanvas.value, {
+    type: 'doughnut',
+    data: {
+      labels: folderStats.value.map((f) => f.folder),
+      datasets: [
+        {
+          data: folderStats.value.map((f) => Math.round(f.watch_seconds / 6) / 10),
+          backgroundColor: folderStats.value.map((_, i) => FOLDER_COLORS[i % FOLDER_COLORS.length]),
+          borderColor: '#121216',
+          borderWidth: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '58%',
+      plugins: {
+        legend: { position: 'right', labels: { color: '#e5e7eb', boxWidth: 14 } },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const f = folderStats.value[c.dataIndex]
+              return ` ${f.folder}: ${formatDuration(f.watch_seconds)} (${f.views} views)`
+            },
+          },
+        },
+      },
+    },
+  })
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [s, t, d] = await Promise.all([api.summary(), api.topVideos(10), api.daily(rangeDays.value)])
+    const [s, t, d, f, b] = await Promise.all([
+      api.summary(),
+      api.topVideos(10),
+      api.daily(rangeDays.value),
+      api.folderStats(rangeDays.value),
+      api.blocked(),
+    ])
     summary.value = s
     topVideos.value = t
     daily.value = d
+    folderStats.value = f
+    blockedList.value = b
     await nextTick()
     renderLineChart()
     renderBarChart()
+    renderFolderChart()
   } catch (e) {
     error.value = e.message
   } finally {
@@ -130,8 +184,14 @@ async function load() {
 
 async function setRange(days) {
   rangeDays.value = days
-  daily.value = await api.daily(days)
+  ;[daily.value, folderStats.value] = await Promise.all([api.daily(days), api.folderStats(days)])
   renderLineChart()
+  renderFolderChart()
+}
+
+async function unhide(item) {
+  await api.setFlags(item.id, { blocked: false })
+  blockedList.value = blockedList.value.filter((b) => b.id !== item.id)
 }
 
 async function setMode(m) {
@@ -143,6 +203,7 @@ onMounted(load)
 onBeforeUnmount(() => {
   lineChart?.destroy()
   barChart?.destroy()
+  folderChart?.destroy()
 })
 </script>
 
@@ -214,6 +275,23 @@ onBeforeUnmount(() => {
             </tr>
           </tbody>
         </table>
+      </section>
+
+      <section class="chart-panel">
+        <div class="chart-head"><h2>Watch time by folder</h2></div>
+        <p v-if="!folderStats.length" class="dash-empty">No folder activity yet.</p>
+        <div v-else class="chart-box"><canvas ref="folderCanvas" /></div>
+      </section>
+
+      <section v-if="blockedList.length" class="chart-panel">
+        <div class="chart-head"><h2>Hidden items ({{ blockedList.length }})</h2></div>
+        <p class="dash-empty">These were removed from your feed. Unhide to bring them back.</p>
+        <div class="hidden-list">
+          <div v-for="item in blockedList" :key="item.id" class="hidden-row">
+            <span class="cell-name" :title="item.relpath">{{ item.relpath }}</span>
+            <button class="unhide-btn" @click="unhide(item)">Unhide</button>
+          </div>
+        </div>
       </section>
 
       <section class="chart-panel">
