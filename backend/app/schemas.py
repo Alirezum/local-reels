@@ -13,7 +13,19 @@ class VideoOut(BaseModel):
     url: str
     duration: float
     size: int
+    favorite: bool = False
     created_at: str
+
+
+class FlagIn(BaseModel):
+    video_id: str
+    favorite: bool | None = None
+    blocked: bool | None = None
+
+
+class FolderOut(BaseModel):
+    name: str
+    count: int
 
 
 class WatchIn(BaseModel):
@@ -48,5 +60,11 @@ class TopVideoOut(BaseModel):
 
 class DailyOut(BaseModel):
     date: str
+    watch_seconds: float
+    views: int
+
+
+class FolderStatOut(BaseModel):
+    folder: str
     watch_seconds: float
     views: int

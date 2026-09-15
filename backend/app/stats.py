@@ -12,9 +12,12 @@ from datetime import date, datetime, timedelta, timezone
 import aiosqlite
 from fastapi import APIRouter, Query, Request
 
-from .schemas import DailyOut, SummaryOut, TopVideoOut
+from .schemas import DailyOut, FolderStatOut, SummaryOut, TopVideoOut
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
+
+# Extracts the top-level folder from a relative POSIX path ("trips/paris.mp4" -> "trips").
+FOLDER_EXPR = "CASE WHEN instr(v.filename, '/') > 0 THEN substr(v.filename, 1, instr(v.filename, '/') - 1) ELSE '(root)' END"
 
 VIEW_GAP_SECONDS = 30
 
@@ -110,3 +113,29 @@ async def daily(
             )
         )
     return out
+
+
+@router.get("/folders", response_model=list[FolderStatOut])
+async def folders(
+    request: Request, days: int = Query(default=30, ge=1, le=365)
+) -> list[FolderStatOut]:
+    conn: aiosqlite.Connection = request.app.state.conn
+    since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    sql = (
+        SESSIONS_CTE
+        + f"SELECT {FOLDER_EXPR} AS folder, "
+        "SUM(s.duration_watched) AS watch_seconds, SUM(s.is_new_view) AS views "
+        "FROM sessions s JOIN videos v ON v.id = s.video_id "
+        "WHERE date(s.created_at) >= ? "
+        "GROUP BY folder ORDER BY watch_seconds DESC"
+    )
+    async with conn.execute(sql, (since,)) as cur:
+        rows = await cur.fetchall()
+    return [
+        FolderStatOut(
+            folder=r["folder"],
+            watch_seconds=round(float(r["watch_seconds"]), 2),
+            views=int(r["views"]),
+        )
+        for r in rows
+    ]

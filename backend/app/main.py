@@ -36,6 +36,7 @@ app.add_middleware(
 
 app.include_router(videos.router)
 app.include_router(videos.config_router)
+app.include_router(videos.flag_router)
 app.include_router(watch.router)
 app.include_router(stats.router)
 app.include_router(media.router)

@@ -40,6 +40,13 @@ CREATE TABLE IF NOT EXISTS config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS user_flags (
+    video_id   TEXT PRIMARY KEY REFERENCES videos(id),
+    favorite   INTEGER NOT NULL DEFAULT 0,
+    blocked    INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
 """
 
 
