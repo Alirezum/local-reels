@@ -100,6 +100,28 @@ body {
   transform: scale(0.92);
 }
 
+.nav-arrows {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nav-arrows .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .nav-arrows {
+    display: flex;
+  }
+}
+
 .filter-bar {
   display: flex;
   align-items: center;

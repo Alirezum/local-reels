@@ -278,6 +278,16 @@ onBeforeUnmount(() => observer?.disconnect())
       />
     </main>
 
+    <div v-if="videos.length" class="nav-arrows">
+      <button
+        class="icon-btn"
+        title="Previous (↑)"
+        :disabled="activeIndex === 0"
+        @click="scrollByOne(-1)"
+      >▲</button>
+      <button class="icon-btn" title="Next (↓)" @click="scrollByOne(1)">▼</button>
+    </div>
+
     <div v-else-if="loading" class="feed-state">
       <span class="spinner" />
       <p>Loading videos…</p>
