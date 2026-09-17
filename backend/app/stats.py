@@ -84,24 +84,27 @@ async def top_videos(
     ]
 
 
+def _window_start(days: int) -> date:
+    return datetime.now(timezone.utc).date() - timedelta(days=days - 1)
+
+
 @router.get("/daily", response_model=list[DailyOut])
 async def daily(
     request: Request, days: int = Query(default=30, ge=1, le=365)
 ) -> list[DailyOut]:
     conn: aiosqlite.Connection = request.app.state.conn
-    since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    start = _window_start(days)
     sql = (
         SESSIONS_CTE
         + "SELECT date(created_at) AS day, SUM(duration_watched) AS watch_seconds, "
         "SUM(is_new_view) AS views FROM sessions WHERE date(created_at) >= ? "
         "GROUP BY day"
     )
-    async with conn.execute(sql, (since,)) as cur:
+    async with conn.execute(sql, (start.isoformat(),)) as cur:
         rows = await cur.fetchall()
     by_day = {r["day"]: r for r in rows}
 
     out: list[DailyOut] = []
-    start = date.today() - timedelta(days=days - 1)
     for i in range(days):
         key = (start + timedelta(days=i)).isoformat()
         r = by_day.get(key)
@@ -120,7 +123,6 @@ async def folders(
     request: Request, days: int = Query(default=30, ge=1, le=365)
 ) -> list[FolderStatOut]:
     conn: aiosqlite.Connection = request.app.state.conn
-    since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     sql = (
         SESSIONS_CTE
         + f"SELECT {FOLDER_EXPR} AS folder, "
@@ -129,7 +131,7 @@ async def folders(
         "WHERE date(s.created_at) >= ? "
         "GROUP BY folder ORDER BY watch_seconds DESC"
     )
-    async with conn.execute(sql, (since,)) as cur:
+    async with conn.execute(sql, (_window_start(days).isoformat(),)) as cur:
         rows = await cur.fetchall()
     return [
         FolderStatOut(

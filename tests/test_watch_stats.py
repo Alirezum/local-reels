@@ -21,6 +21,53 @@ def fixed_stats_clock(monkeypatch, sandbox):
     monkeypatch.setattr(stats, "date", FixedDate)
 
 
+@pytest.mark.parametrize("local_day", [14, 16])
+@pytest.mark.parametrize("days", [1, 3])
+def test_daily_uses_one_utc_date(client, library, sql, monkeypatch, local_day, days):
+    from backend.app import stats
+
+    calls = []
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            calls.append(tz)
+            return cls(2026, 6, 15, 0, 30, tzinfo=timezone.utc).astimezone(tz)
+
+    class LocalDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 6, local_day)
+
+    monkeypatch.setattr(stats, "datetime", FixedDatetime)
+    monkeypatch.setattr(stats, "date", LocalDate)
+    for timestamp, duration in [
+        ("2026-06-12T23:59:59Z", 100),
+        ("2026-06-13T00:00:00Z", 5),
+        ("2026-06-15T00:00:00Z", 7),
+    ]:
+        sql(
+            "INSERT INTO watch_events "
+            "(video_id, start_time, end_time, duration_watched, created_at) "
+            "VALUES (?, 0, ?, ?, ?)",
+            (library["root.mp4"]["id"], duration, duration, timestamp),
+        )
+    expected = [
+        {"date": "2026-06-13", "watch_seconds": 5, "views": 0},
+        {"date": "2026-06-14", "watch_seconds": 0, "views": 0},
+        {"date": "2026-06-15", "watch_seconds": 7, "views": 1},
+    ]
+    response = client.get("/api/stats/daily", params={"days": days})
+    assert response.status_code == 200
+    assert response.json() == expected[-days:]
+    assert calls == [timezone.utc]
+    calls.clear()
+    assert client.get("/api/stats/folders", params={"days": days}).json() == [
+        {"folder": "(root)", "watch_seconds": 7 if days == 1 else 12, "views": 1},
+    ]
+    assert calls == [timezone.utc]
+
+
 def test_empty_stats(client, fixed_stats_clock):
     assert client.get("/api/stats/summary").json() == {
         "total_watch_seconds": 0,
