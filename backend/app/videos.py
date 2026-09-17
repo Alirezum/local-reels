@@ -9,8 +9,8 @@ from urllib.parse import quote
 import aiosqlite
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from .schemas import ConfigIn, ConfigOut, FlagIn, FolderOut, VideoOut
 from .scan import sync_directory
+from .schemas import ConfigIn, ConfigOut, FlagIn, FolderOut, VideoOut
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 config_router = APIRouter(prefix="/api/config", tags=["config"])

@@ -10,7 +10,6 @@ from . import media, stats, videos, watch
 from .db import get_connection, init_schema
 from .scan import sync_directory
 
-
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
