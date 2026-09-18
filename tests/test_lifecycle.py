@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app import db, main
-
 
 def test_close_connection_resets_singleton(sandbox):
+    from backend.app import db
+
     async def exercise():
         conn = await db.get_connection()
         try:
@@ -29,6 +29,8 @@ def test_close_connection_resets_singleton(sandbox):
 
 
 def test_repeated_client_lifespans(sandbox):
+    from backend.app import db, main
+
     connections = []
     try:
         for _ in range(2):
@@ -45,6 +47,8 @@ def test_repeated_client_lifespans(sandbox):
 
 @pytest.mark.parametrize("stage", ["init_schema", "sync_directory"])
 def test_startup_failure_cleanup_and_recovery(sandbox, monkeypatch, stage):
+    from backend.app import db, main
+
     original = getattr(main, stage)
     failure = AsyncMock(side_effect=RuntimeError("startup failed"))
     monkeypatch.setattr(main, stage, failure)
@@ -72,6 +76,8 @@ def test_startup_failure_cleanup_and_recovery(sandbox, monkeypatch, stage):
 
 
 def test_lifespan_body_failure_cleanup(sandbox):
+    from backend.app import db, main
+
     async def exercise():
         try:
             with pytest.raises(RuntimeError, match="body failed"):
@@ -94,6 +100,8 @@ def test_lifespan_body_failure_cleanup(sandbox):
 
 @pytest.mark.parametrize("pragma", ["PRAGMA foreign_keys = ON", "PRAGMA journal_mode = WAL"])
 def test_pragma_failure_cleanup_and_recovery(sandbox, monkeypatch, pragma):
+    from backend.app import db
+
     original = db.aiosqlite.Connection.execute
     connections = []
 

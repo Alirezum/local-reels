@@ -1,6 +1,25 @@
 import pytest
 
 
+@pytest.mark.parametrize("field", ["video_dir", "db_path"])
+@pytest.mark.parametrize("kind", ["relative", "absolute", "home", "empty"])
+def test_settings_resolve_paths_from_project_root(sandbox, monkeypatch, field, kind):
+    from backend.app import config
+
+    project_root = sandbox.root / "project"
+    home = sandbox.root / "home"
+    monkeypatch.setattr(config, "PROJECT_ROOT", project_root)
+    monkeypatch.setenv("HOME", str(home))
+    value, expected = {
+        "relative": ("nested/../target", project_root / "target"),
+        "absolute": (str(sandbox.root / "target"), sandbox.root / "target"),
+        "home": ("~/nested/../target", home / "target"),
+        "empty": ("", project_root),
+    }[kind]
+    settings = config.Settings(_env_file=None, **{field: value})
+    assert getattr(settings, f"resolved_{field}")() == expected.resolve()
+
+
 def test_config_persists_and_controls_subsequent_scans(client, sandbox, library, sql):
     replacement = sandbox.root / "replacement"
     replacement.mkdir()

@@ -11,6 +11,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _resolve_project_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    return (path if path.is_absolute() else PROJECT_ROOT / path).resolve()
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
@@ -24,12 +29,10 @@ class Settings(BaseSettings):
     port: int = 8000
 
     def resolved_video_dir(self) -> Path:
-        p = Path(self.video_dir).expanduser()
-        return (p if p.is_absolute() else PROJECT_ROOT / p).resolve()
+        return _resolve_project_path(self.video_dir)
 
     def resolved_db_path(self) -> Path:
-        p = Path(self.db_path).expanduser()
-        return (p if p.is_absolute() else PROJECT_ROOT / p).resolve()
+        return _resolve_project_path(self.db_path)
 
 
 settings = Settings()

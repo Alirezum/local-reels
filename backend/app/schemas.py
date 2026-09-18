@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 class VideoOut(BaseModel):
     id: str
     filename: str  # display name (basename)
-    relpath: str   # path relative to the video dir, used for the stream URL
-    type: str      # "video" | "image"
+    relpath: str  # path relative to the video dir, used for the stream URL
+    type: str  # "video" | "image"
     url: str
     duration: float
     size: int

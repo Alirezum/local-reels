@@ -1,3 +1,4 @@
+import hashlib
 import os
 
 import pytest
@@ -30,6 +31,28 @@ def test_scan_caches_duration_and_reprobes_changed_files(client, sandbox, librar
     assert updated["root.mp4"]["duration"] == 36
     assert client.get("/api/videos").status_code == 200
     assert len(sandbox.probes) == 5
+
+
+@pytest.mark.parametrize("relpath", ["root.mp4", "Alpha/first clip.MP4", "旅行/動画.mp4"])
+def test_video_id_preserves_sha1_identity(sandbox, relpath):
+    from backend.app.scan import video_id_for
+
+    assert video_id_for(relpath) == hashlib.sha1(relpath.encode("utf-8")).hexdigest()[:16]
+
+
+def test_directory_change_preserves_relative_path_identity(client, sandbox, library, sql):
+    original = library["root.mp4"]
+    replacement = sandbox.root / "replacement"
+    replacement.mkdir()
+    path = replacement / "root.mp4"
+    path.write_bytes(b"replacement content")
+    assert client.post("/api/config", json={"video_dir": str(replacement)}).status_code == 200
+    updated = client.get("/api/videos").json()[0]
+    assert updated["id"] == original["id"]
+    assert updated["created_at"] == original["created_at"]
+    assert sql("SELECT path, removed FROM videos WHERE id = ?", (original["id"],)) == [
+        {"path": str(path), "removed": 0}
+    ]
 
 
 def test_zero_duration_is_reprobed(client, sandbox):

@@ -1,4 +1,5 @@
 import re
+from unittest.mock import Mock
 
 import pytest
 
@@ -160,6 +161,56 @@ def test_random_membership_limits_and_filters(client, library, order):
     assert (
         client.get("/api/videos/random", params={"order": order, "folder": "missing"}).json() == []
     )
+
+
+@pytest.mark.parametrize(
+    ("count", "weights", "fraction", "expected", "totals", "shuffles"),
+    [
+        (0, {}, 0, [], [], 0),
+        (1, {}, 0, ["0"], [1.0], 0),
+        (3, {}, 0, ["0", "1", "2"], [3.0, 2.0, 1.0], 0),
+        (3, {}, 1, ["2", "1", "0"], [3.0, 2.0, 1.0], 0),
+        (3, {}, 2, ["2", "1", "0"], [3.0, 2.0, 1.0], 0),
+        (3, {"0": 0.0, "1": 0.0, "2": 0.0}, 0, ["2", "1", "0"], [], 1),
+        (3, {"0": -3.0}, 0, ["2", "1", "0"], [], 1),
+        (3, {"0": 0.0}, 0, ["0", "1", "2"], [2.0, 2.0, 1.0], 0),
+        (3, {"0": 0.0, "1": 2.0, "2": 0.0}, 1, ["1", "2", "0"], [2.0], 1),
+    ],
+)
+def test_weighted_sampling_edges(
+    sandbox, monkeypatch, count, weights, fraction, expected, totals, shuffles
+):
+    from backend.app import videos
+    from backend.app.schemas import VideoOut
+
+    items = [
+        VideoOut(
+            id=str(index),
+            filename=f"{index}.mp4",
+            relpath=f"{index}.mp4",
+            type="video",
+            url=f"/videos/{index}.mp4",
+            duration=0,
+            size=0,
+            created_at="2026-01-01T00:00:00Z",
+        )
+        for index in range(count)
+    ]
+    original_items = list(items)
+    original_weights = dict(weights)
+    uniform = Mock(side_effect=lambda start, total: total * fraction)
+    shuffle = Mock(side_effect=lambda pool: pool.reverse())
+    monkeypatch.setattr(videos.random, "uniform", uniform)
+    monkeypatch.setattr(videos.random, "shuffle", shuffle)
+
+    result = videos.weighted_sample_without_replacement(items, weights)
+
+    assert [item.id for item in result] == expected
+    assert items == original_items
+    assert weights == original_weights
+    assert result is not items
+    assert [call.args for call in uniform.call_args_list] == [(0, total) for total in totals]
+    assert shuffle.call_count == shuffles
 
 
 @pytest.mark.parametrize(

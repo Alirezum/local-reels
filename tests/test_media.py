@@ -1,5 +1,41 @@
 import pytest
 
+from backend.app.media import _parse_range
+
+
+@pytest.mark.parametrize(
+    ("header", "size", "expected"),
+    [
+        ("bytes=2-5", 10, (2, 5)),
+        ("bytes=6-", 10, (6, 9)),
+        ("bytes=-3", 10, (7, 9)),
+        ("bytes=7-100", 10, (7, 9)),
+        ("bytes=-100", 10, (0, 9)),
+        ("bytes=0-0", 10, (0, 0)),
+        (" bytes=1-2 ", 10, (1, 2)),
+        ("bytes=0001-0002", 10, (1, 2)),
+        ("bytes=10-", 10, None),
+        ("bytes=20-30", 10, None),
+        ("bytes=5-2", 10, None),
+        ("bytes=-0", 10, None),
+        ("bytes=0-", 0, None),
+        ("bytes=0-0", 0, None),
+        ("bytes=-1", 0, None),
+    ],
+)
+def test_parse_range(header, size, expected):
+    assert _parse_range(header, size) == expected
+
+
+@pytest.mark.parametrize("size", [0, 10])
+@pytest.mark.parametrize(
+    "header",
+    ["", " ", "bytes=-", "bytes=abc-def", "items=0-1", "bytes=0-1,3-4", "bytes=1", "Bytes=0-1"],
+)
+def test_parse_range_malformed(header, size):
+    with pytest.raises(ValueError):
+        _parse_range(header, size)
+
 
 @pytest.mark.parametrize(
     ("relpath", "content", "media_type"),

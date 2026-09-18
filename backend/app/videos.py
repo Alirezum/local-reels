@@ -9,14 +9,19 @@ from urllib.parse import quote
 import aiosqlite
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from .db import set_setting
 from .scan import sync_directory
 from .schemas import ConfigIn, ConfigOut, FlagIn, FolderOut, VideoOut
+from .stats import SESSIONS_CTE
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 config_router = APIRouter(prefix="/api/config", tags=["config"])
 flag_router = APIRouter(tags=["flags"])
 
 ROOT_FOLDER = "(root)"
+_DEFAULT_WEIGHT = 1.0
+_SECONDS_PER_MINUTE = 60.0
+_WATCHED_MINUTES_DIVISOR = 5.0
 
 
 def top_folder(relpath: str) -> str:
@@ -103,8 +108,9 @@ async def list_folders(request: Request) -> list[FolderOut]:
     conn: aiosqlite.Connection = request.app.state.conn
     videos = await fetch_videos(conn)
     counts: dict[str, int] = {}
-    for v in videos:
-        counts[top_folder(v.relpath)] = counts.get(top_folder(v.relpath), 0) + 1
+    for video in videos:
+        folder = top_folder(video.relpath)
+        counts[folder] = counts.get(folder, 0) + 1
     return sorted(
         (FolderOut(name=k, count=n) for k, n in counts.items()),
         key=lambda f: (f.name == ROOT_FOLDER, f.name.lower()),
@@ -117,18 +123,20 @@ async def fetch_view_weights(conn: aiosqlite.Connection) -> dict[str, float]:
     weight = 1 / (1 + view_sessions + watched_minutes / 5). Never-seen media
     score 1.0; a heavily watched clip scores near 0.
     """
-    from .stats import SESSIONS_CTE
-
     sql = (
-        SESSIONS_CTE
-        + "SELECT video_id, SUM(is_new_view) AS views, "
+        SESSIONS_CTE + "SELECT video_id, SUM(is_new_view) AS views, "
         "SUM(duration_watched) AS seconds FROM sessions GROUP BY video_id"
     )
     async with conn.execute(sql) as cur:
         rows = await cur.fetchall()
     return {
-        r["video_id"]: 1.0 / (1.0 + float(r["views"]) + float(r["seconds"]) / 60.0 / 5.0)
-        for r in rows
+        row["video_id"]: _DEFAULT_WEIGHT
+        / (
+            _DEFAULT_WEIGHT
+            + float(row["views"])
+            + float(row["seconds"]) / _SECONDS_PER_MINUTE / _WATCHED_MINUTES_DIVISOR
+        )
+        for row in rows
     }
 
 
@@ -136,39 +144,30 @@ def weighted_sample_without_replacement(
     videos: list[VideoOut], weights: dict[str, float]
 ) -> list[VideoOut]:
     pool = list(videos)
-    remaining = [weights.get(v.id, 1.0) for v in pool]
+    remaining_weights = [weights.get(video.id, _DEFAULT_WEIGHT) for video in pool]
     picked: list[VideoOut] = []
     while pool:
-        total = sum(remaining)
-        if total <= 0:
+        total_weight = sum(remaining_weights)
+        if total_weight <= 0:
             random.shuffle(pool)
             picked.extend(pool)
             break
-        r = random.uniform(0, total)
-        acc = 0.0
-        idx = 0
-        for i, w in enumerate(remaining):
-            acc += w
-            if r <= acc:
-                idx = i
+        threshold = random.uniform(0, total_weight)
+        cumulative_weight = 0.0
+        selected_index = 0
+        for index, weight in enumerate(remaining_weights):
+            cumulative_weight += weight
+            if threshold <= cumulative_weight:
+                selected_index = index
                 break
         else:
-            idx = len(pool) - 1
-        picked.append(pool.pop(idx))
-        remaining.pop(idx)
+            selected_index = len(pool) - 1
+        picked.append(pool.pop(selected_index))
+        remaining_weights.pop(selected_index)
     return picked
 
 
-@flag_router.post("/api/flags")
-async def set_flags(payload: FlagIn, request: Request) -> dict[str, bool]:
-    conn: aiosqlite.Connection = request.app.state.conn
-    if payload.favorite is None and payload.blocked is None:
-        raise HTTPException(status_code=400, detail="Nothing to update")
-
-    async with conn.execute("SELECT 1 FROM videos WHERE id = ?", (payload.video_id,)) as cur:
-        if await cur.fetchone() is None:
-            raise HTTPException(status_code=404, detail="Unknown video_id")
-
+async def _update_flags(conn: aiosqlite.Connection, payload: FlagIn) -> None:
     # Only touch the provided fields; an existing row is updated in place so
     # unset flags keep their value. Insert (with defaults) only when absent.
     sets: list[str] = []
@@ -195,6 +194,19 @@ async def set_flags(payload: FlagIn, request: Request) -> dict[str, bool]:
                 int(payload.blocked or False),
             ),
         )
+
+
+@flag_router.post("/api/flags")
+async def set_flags(payload: FlagIn, request: Request) -> dict[str, bool]:
+    conn: aiosqlite.Connection = request.app.state.conn
+    if payload.favorite is None and payload.blocked is None:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    async with conn.execute("SELECT 1 FROM videos WHERE id = ?", (payload.video_id,)) as cur:
+        if await cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Unknown video_id")
+
+    await _update_flags(conn, payload)
     await conn.commit()
     async with conn.execute(
         "SELECT favorite, blocked FROM user_flags WHERE video_id = ?", (payload.video_id,)
@@ -230,8 +242,6 @@ async def get_config(request: Request) -> ConfigOut:
 
 @config_router.post("", response_model=ConfigOut)
 async def update_config(payload: ConfigIn, request: Request) -> ConfigOut:
-    from .db import set_setting
-
     conn: aiosqlite.Connection = request.app.state.conn
     candidate = Path(payload.video_dir).expanduser()
     candidate = (candidate if candidate.is_absolute() else Path.cwd() / candidate).resolve()
