@@ -1,27 +1,29 @@
 import contextlib
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import media, stats, videos, watch
-from .db import get_connection, init_schema
+from .db import close_connection, get_connection, init_schema
 from .scan import sync_directory
-
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
 @contextlib.asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     conn = await get_connection()
     app.state.conn = conn
-    await init_schema(conn)
-    await sync_directory(app)  # resolves app.state.video_dir + syncs the video index
-    yield
-    await conn.close()
+    try:
+        await init_schema(conn)
+        await sync_directory(app)  # resolves app.state.video_dir + syncs the video index
+        yield
+    finally:
+        await close_connection()
 
 
 app = FastAPI(title="Local Reels", version="1.0.0", lifespan=lifespan)
@@ -51,7 +53,7 @@ if FRONTEND_DIST.is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    async def spa(full_path: str):
+    async def spa(full_path: str) -> Response:
         if full_path.startswith(("api", "videos")):
             return JSONResponse({"detail": "Not Found"}, status_code=404)
         candidate = (FRONTEND_DIST / full_path).resolve()

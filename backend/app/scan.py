@@ -16,7 +16,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 import aiosqlite
 
@@ -32,7 +32,21 @@ VIDEO_EXTS = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi", ".ogv", ".ogg"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp"}
 MEDIA_EXTS = VIDEO_EXTS | IMAGE_EXTS
 
-_PROBE_SEM = asyncio.Semaphore(8)
+_PROBE_CONCURRENCY = 8
+_PROBE_TIMEOUT_SECONDS = 20
+_MTIME_TOLERANCE_SECONDS = 2
+_VIDEO_ID_LENGTH = 16
+
+_PROBE_SEM = asyncio.Semaphore(_PROBE_CONCURRENCY)
+
+
+class MediaInfo(TypedDict):
+    relpath: str
+    path: Path
+    kind: str
+    size: int
+    mtime: float
+    duration: float
 
 
 def media_kind(rel_path: str) -> str:
@@ -40,7 +54,7 @@ def media_kind(rel_path: str) -> str:
 
 
 def video_id_for(rel_path: str) -> str:
-    return hashlib.sha1(rel_path.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha1(rel_path.encode("utf-8")).hexdigest()[:_VIDEO_ID_LENGTH]
 
 
 def iter_media_files(root: Path) -> list[tuple[str, Path]]:
@@ -94,7 +108,7 @@ async def probe_duration(path: Path) -> float:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            out, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=_PROBE_TIMEOUT_SECONDS)
             data = json.loads(out or b"{}")
             return round(float(data.get("format", {}).get("duration") or 0.0), 2)
         except Exception:
@@ -108,36 +122,27 @@ def resolve_video_dir(override: str | None) -> Path:
     return settings.resolved_video_dir()
 
 
-async def sync_directory(app: "FastAPI", video_dir: Path | None = None) -> Path:
-    """Scan the (optionally new) media dir, upsert rows, return the dir used."""
-    conn: aiosqlite.Connection = app.state.conn
-    if video_dir is None:
-        video_dir = resolve_video_dir(await get_setting(conn, "video_dir"))
-    app.state.video_dir = video_dir
-
-    if not video_dir.is_dir():
-        logger.warning("Video directory does not exist: %s", video_dir)
-        await conn.execute("UPDATE videos SET removed = 1 WHERE removed = 0")
-        await conn.commit()
-        return video_dir
-
-    files = iter_media_files(video_dir)
-
+async def _load_existing_rows(conn: aiosqlite.Connection) -> dict[str, aiosqlite.Row]:
     existing: dict[str, aiosqlite.Row] = {}
     async with conn.execute("SELECT filename, duration, size, mtime FROM videos") as cur:
         for row in await cur.fetchall():
             existing[row["filename"]] = row
+    return existing
 
-    infos: list[dict] = []
-    to_probe: list[dict] = []
+
+def _plan_metadata(
+    files: list[tuple[str, Path]], existing: dict[str, aiosqlite.Row]
+) -> tuple[list[MediaInfo], list[MediaInfo]]:
+    infos: list[MediaInfo] = []
+    to_probe: list[MediaInfo] = []
     for rel, abs_path in files:
         try:
             st = abs_path.stat()
         except OSError:
             continue
         kind = media_kind(rel)
-        info = {
-            "rel": rel,
+        info: MediaInfo = {
+            "relpath": rel,
             "path": abs_path,
             "kind": kind,
             "size": st.st_size,
@@ -150,14 +155,17 @@ async def sync_directory(app: "FastAPI", video_dir: Path | None = None) -> Path:
         elif (
             old is not None
             and old["size"] == st.st_size
-            and abs(old["mtime"] - st.st_mtime) < 2
+            and abs(old["mtime"] - st.st_mtime) < _MTIME_TOLERANCE_SECONDS
             and old["duration"] > 0
         ):
             info["duration"] = old["duration"]  # cached, skip ffprobe
         else:
             to_probe.append(info)
         infos.append(info)
+    return infos, to_probe
 
+
+async def _probe_metadata(to_probe: list[MediaInfo]) -> None:
     if to_probe:
         if shutil.which("ffprobe") is None:
             logger.warning("ffprobe not found; durations will report as 0")
@@ -165,6 +173,8 @@ async def sync_directory(app: "FastAPI", video_dir: Path | None = None) -> Path:
         for info, dur in zip(to_probe, durations):
             info["duration"] = dur
 
+
+async def _upsert_media(conn: aiosqlite.Connection, infos: list[MediaInfo]) -> None:
     await conn.executemany(
         """
         INSERT INTO videos (id, filename, path, type, duration, size, mtime, removed, created_at)
@@ -179,8 +189,8 @@ async def sync_directory(app: "FastAPI", video_dir: Path | None = None) -> Path:
         """,
         [
             (
-                video_id_for(i["rel"]),
-                i["rel"],
+                video_id_for(i["relpath"]),
+                i["relpath"],
                 str(i["path"]),
                 i["kind"],
                 i["duration"],
@@ -191,8 +201,9 @@ async def sync_directory(app: "FastAPI", video_dir: Path | None = None) -> Path:
         ],
     )
 
+
+async def _mark_missing(conn: aiosqlite.Connection, rels: list[str]) -> None:
     # Flag DB rows whose files disappeared from disk (kept for stats integrity).
-    rels = [i["rel"] for i in infos]
     if rels:
         placeholders = ",".join("?" * len(rels))
         await conn.execute(
@@ -201,5 +212,26 @@ async def sync_directory(app: "FastAPI", video_dir: Path | None = None) -> Path:
         )
     else:
         await conn.execute("UPDATE videos SET removed = 1 WHERE removed = 0")
+
+
+async def sync_directory(app: "FastAPI", video_dir: Path | None = None) -> Path:
+    """Scan the (optionally new) media dir, upsert rows, return the dir used."""
+    conn: aiosqlite.Connection = app.state.conn
+    if video_dir is None:
+        video_dir = resolve_video_dir(await get_setting(conn, "video_dir"))
+    app.state.video_dir = video_dir
+
+    if not video_dir.is_dir():
+        logger.warning("Video directory does not exist: %s", video_dir)
+        await _mark_missing(conn, [])
+        await conn.commit()
+        return video_dir
+
+    files = iter_media_files(video_dir)
+    existing = await _load_existing_rows(conn)
+    infos, to_probe = _plan_metadata(files, existing)
+    await _probe_metadata(to_probe)
+    await _upsert_media(conn, infos)
+    await _mark_missing(conn, [i["relpath"] for i in infos])
     await conn.commit()
     return video_dir

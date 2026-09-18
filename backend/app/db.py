@@ -56,10 +56,22 @@ async def get_connection() -> aiosqlite.Connection:
         db_path = settings.resolved_db_path()
         db_path.parent.mkdir(parents=True, exist_ok=True)
         _conn = await aiosqlite.connect(db_path)
-        _conn.row_factory = aiosqlite.Row
-        await _conn.execute("PRAGMA foreign_keys = ON")
-        await _conn.execute("PRAGMA journal_mode = WAL")
+        try:
+            _conn.row_factory = aiosqlite.Row
+            await _conn.execute("PRAGMA foreign_keys = ON")
+            await _conn.execute("PRAGMA journal_mode = WAL")
+        except BaseException:
+            await close_connection()
+            raise
     return _conn
+
+
+async def close_connection() -> None:
+    global _conn
+    conn = _conn
+    _conn = None
+    if conn is not None:
+        await conn.close()
 
 
 async def init_schema(conn: aiosqlite.Connection) -> None:
