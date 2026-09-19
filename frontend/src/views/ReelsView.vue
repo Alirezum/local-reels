@@ -5,6 +5,7 @@ import ConfigPanel from '../components/ConfigPanel.vue'
 import ReelItem from '../components/ReelItem.vue'
 import { api } from '../api.js'
 import { useWatchTracker } from '../composables/useWatchTracker.js'
+import { keyboardAction } from '../playback.js'
 
 const BATCH = 25 // slides fetched per request
 const AHEAD = 8 // append the next batch when this few slides remain
@@ -27,8 +28,9 @@ const favoritesOnly = ref(false)
 
 const tracker = useWatchTracker()
 let observer = null
+let loadVersion = 0
+let disposed = false
 
-const isEmpty = computed(() => !loading.value && !loadError.value && videos.value.length === 0)
 const filterActive = computed(() => activeFolder.value !== '' || favoritesOnly.value)
 
 function currentFilters() {
@@ -36,10 +38,11 @@ function currentFilters() {
 }
 
 function bindObserver() {
-  if (!feedEl.value) return
+  if (!feedEl.value || disposed) return
   observer?.disconnect()
   observer = new IntersectionObserver(
     (entries) => {
+      if (disposed || loading.value) return
       let best = null
       for (const entry of entries) {
         if (entry.isIntersecting && (!best || entry.intersectionRatio > best.intersectionRatio)) {
@@ -49,12 +52,9 @@ function bindObserver() {
       if (!best) return
       const idx = Number(best.target.dataset.index)
       if (!Number.isNaN(idx) && idx !== activeIndex.value) {
-        activeIndex.value = idx
+        tracker.setPlaying(false)
         tracker.setActive(videos.value[idx]?.id ?? null)
-        // Videos count time only while actually playing; an active image
-        // (no <video> element inside) counts as "playing" until swiped.
-        const vid = best.target.querySelector('video')
-        tracker.setPlaying(vid ? !vid.paused : true)
+        activeIndex.value = idx
       }
     },
     { root: feedEl.value, threshold: [0.6] },
@@ -62,9 +62,9 @@ function bindObserver() {
   for (const node of feedEl.value.querySelectorAll('.reel')) observer.observe(node)
 }
 
-async function fetchBatch() {
+async function fetchBatch(version = loadVersion) {
   const fresh = await api.randomVideos(BATCH, order.value, currentFilters())
-  if (!fresh.length) return 0
+  if (disposed || version !== loadVersion || !fresh.length) return 0
   const recent = new Set(videos.value.slice(-60).map((v) => v.id))
   let pool = fresh.filter((v) => !brokenIds.has(v.id) && !recent.has(v.id))
   if (!pool.length) pool = fresh.filter((v) => !brokenIds.has(v.id))
@@ -73,31 +73,41 @@ async function fetchBatch() {
   return pool.length
 }
 
-async function loadFolders() {
+async function loadFolders(version = loadVersion) {
   try {
-    folders.value = await api.folders()
+    const result = await api.folders()
+    if (!disposed && version === loadVersion) folders.value = result
   } catch {
-    folders.value = []
+    if (!disposed && version === loadVersion) folders.value = []
   }
 }
 
 async function load() {
+  const version = ++loadVersion
   loading.value = true
   loadError.value = ''
+  observer?.disconnect()
+  tracker.setPlaying(false)
+  tracker.setActive(null)
+  videos.value = []
+  activeIndex.value = 0
   try {
-    config.value = await api.getConfig()
-    videos.value = []
-    await loadFolders()
-    if (!(await fetchBatch())) {
-      config.value = await api.getConfig() // refresh count/error state
-    }
-    await nextTick()
-    bindObserver()
+    const result = await api.getConfig()
+    if (disposed || version !== loadVersion) return
+    config.value = result
+    await loadFolders(version)
+    if (disposed || version !== loadVersion) return
+    await fetchBatch(version)
+    if (disposed || version !== loadVersion) return
     tracker.setActive(videos.value[0]?.id ?? null)
+    await nextTick()
+    if (disposed || version !== loadVersion) return
+    bindObserver()
+    tracker.setPlaying(reelComps.value[0]?.isTracking() ?? false)
   } catch (e) {
-    loadError.value = e.message
+    if (!disposed && version === loadVersion) loadError.value = e.message
   } finally {
-    loading.value = false
+    if (!disposed && version === loadVersion) loading.value = false
   }
 }
 
@@ -119,7 +129,7 @@ async function clearFilters() {
 
 let appending = false
 async function maybeAppend() {
-  if (appending || !videos.value.length || videos.value.length > 1900) return
+  if (disposed || loading.value || appending || !videos.value.length || videos.value.length > 1900) return
   if (videos.value.length - activeIndex.value - 1 > AHEAD) return
   appending = true
   try {
@@ -136,7 +146,10 @@ async function maybeAppend() {
 watch(activeIndex, maybeAppend)
 
 function onReelState({ index, playing }) {
-  if (index === activeIndex.value) tracker.setPlaying(playing)
+  if (!disposed && index === activeIndex.value) {
+    tracker.setActive(videos.value[index]?.id ?? null)
+    tracker.setPlaying(playing)
+  }
 }
 
 function onReelError(video) {
@@ -164,14 +177,15 @@ async function onBlock(video) {
     return
   }
   brokenIds.add(video.id)
-  // Remove every slide for this id, then snap the feed onto the next item.
+  tracker.setPlaying(false)
   videos.value = videos.value.filter((v) => v.id !== video.id)
   if (activeIndex.value > videos.value.length - 1) activeIndex.value = Math.max(0, videos.value.length - 1)
+  tracker.setActive(videos.value[activeIndex.value]?.id ?? null)
   await nextTick()
   bindObserver()
   const feed = feedEl.value
   if (feed) feed.scrollTo({ top: activeIndex.value * feed.clientHeight })
-  tracker.setActive(videos.value[activeIndex.value]?.id ?? null)
+  tracker.setPlaying(reelComps.value[activeIndex.value]?.isTracking() ?? false)
   loadFolders()
 }
 
@@ -202,13 +216,18 @@ function scrollByOne(delta) {
 }
 
 function onKeydown(ev) {
-  if (ev.target instanceof HTMLInputElement) return
-  if (ev.key === 'ArrowDown') { ev.preventDefault(); scrollByOne(1) }
-  else if (ev.key === 'ArrowUp') { ev.preventDefault(); scrollByOne(-1) }
-  else if (ev.key === ' ') { ev.preventDefault(); reelComps.value[activeIndex.value]?.toggle() }
-  else if (ev.key.toLowerCase() === 'm') toggleMute()
-  else if (ev.key.toLowerCase() === 'r') rotateActive()
-  else if (ev.key.toLowerCase() === 's') toggleOrder()
+  const action = keyboardAction(ev)
+  if (!action || disposed || loading.value || !videos.value.length) return
+  ev.preventDefault()
+  const active = reelComps.value[activeIndex.value]
+  if (action === 'next') scrollByOne(1)
+  else if (action === 'previous') scrollByOne(-1)
+  else if (action === 'backward') active?.seekBy(-5)
+  else if (action === 'forward') active?.seekBy(5)
+  else if (action === 'toggle') active?.toggle()
+  else if (action === 'mute') toggleMute()
+  else if (action === 'rotate') rotateActive()
+  else if (action === 'order') toggleOrder()
 }
 
 async function onConfigSaved() {
@@ -220,47 +239,70 @@ onMounted(() => {
   window.addEventListener('keydown', onKeydown)
 })
 
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => {
+  disposed = true
+  ++loadVersion
+  observer?.disconnect()
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>
   <div class="reels-page">
     <header class="reels-header">
       <h1 class="brand">Local Reels</h1>
-      <nav class="header-actions">
+      <nav class="header-actions" aria-label="Feed controls">
         <button
-          class="icon-btn"
+          type="button"
+          class="fav-filter-btn"
+          :disabled="loading"
           :title="order === 'weighted'
-            ? 'Shuffle: showing less-watched first (s) — click for pure random'
-            : 'Shuffle: pure random (s) — click to show less-watched first'"
+            ? 'Showing less-watched first (S). Switch to random order'
+            : 'Random order (S). Switch to less-watched first'"
+          :aria-label="`Feed order: ${order === 'weighted' ? 'less-watched first' : 'random'}. Change order`"
           @click="toggleOrder"
-        >{{ order === 'weighted' ? '🌱' : '🎲' }}</button>
-        <button class="icon-btn" title="Rotate active (r)" @click="rotateActive">⟳</button>
-        <button class="icon-btn" :title="muted ? 'Unmute (m)' : 'Mute (m)'" @click="toggleMute">
-          {{ muted ? '🔇' : '🔊' }}
+        >{{ order === 'weighted' ? 'Less-watched' : 'Random' }}</button>
+        <button type="button" class="icon-btn" aria-label="Rotate active media 90 degrees" title="Rotate active (R)" :disabled="!videos.length || loading" @click="rotateActive">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
+            <path d="M20 11a8 8 0 1 0-2 6M20 4v7h-7" />
+          </svg>
         </button>
-        <RouterLink to="/dashboard" class="icon-btn" title="Dashboard">📊</RouterLink>
+        <button type="button" class="icon-btn" aria-label="Mute audio" :aria-pressed="muted" :title="muted ? 'Unmute (M)' : 'Mute (M)'" @click="toggleMute">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
+            <path d="M11 4 5 9H2v6h3l6 5Z" />
+            <path v-if="muted" d="m16 9 6 6m0-6-6 6" />
+            <path v-else d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" />
+          </svg>
+        </button>
+        <RouterLink to="/dashboard" class="icon-btn" aria-label="Open dashboard" title="Dashboard">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
+            <path d="M3 3v18h18M7 17v-6m5 6V6m5 11V9" />
+          </svg>
+        </RouterLink>
       </nav>
-      <div v-if="folders.length > 1 || favoritesOnly" class="filter-bar">
-        <select class="folder-select" :value="activeFolder" @change="setFolder($event.target.value)">
-          <option value="">📂 All folders</option>
+      <div class="filter-bar">
+        <select class="folder-select" aria-label="Filter by folder" :disabled="loading" :value="activeFolder" @change="setFolder($event.target.value)">
+          <option value="">All folders</option>
           <option v-for="f in folders" :key="f.name" :value="f.name">
             {{ f.name }} ({{ f.count }})
           </option>
         </select>
         <button
+          type="button"
           class="fav-filter-btn"
           :class="{ 'fav-filter-btn--on': favoritesOnly }"
+          :aria-pressed="favoritesOnly"
+          :disabled="loading"
           title="Show favorites only"
           @click="toggleFavorites"
-        >♥ Favorites</button>
-        <button v-if="filterActive" class="fav-filter-btn" title="Clear filters" @click="clearFilters">
-          ✕
+        >Favorites</button>
+        <button v-if="filterActive" type="button" class="fav-filter-btn" :disabled="loading" title="Clear filters" @click="clearFilters">
+          Clear filters
         </button>
       </div>
     </header>
 
-    <main v-if="videos.length" ref="feedEl" class="feed">
+    <main v-if="videos.length" ref="feedEl" class="feed" aria-label="Media feed" :aria-busy="loading">
       <ReelItem
         v-for="(video, i) in videos"
         :key="`${video.id}-${i}`"
@@ -278,22 +320,28 @@ onBeforeUnmount(() => observer?.disconnect())
       />
     </main>
 
-    <div v-if="videos.length" class="nav-arrows">
+    <div v-if="videos.length" class="nav-arrows" role="group" aria-label="Feed navigation">
       <button
+        type="button"
         class="icon-btn"
-        title="Previous (↑)"
+        aria-label="Previous media"
+        title="Previous (Up arrow)"
         :disabled="activeIndex === 0"
         @click="scrollByOne(-1)"
-      >▲</button>
-      <button class="icon-btn" title="Next (↓)" @click="scrollByOne(1)">▼</button>
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><path d="m6 15 6-6 6 6" /></svg>
+      </button>
+      <button type="button" class="icon-btn" aria-label="Next media" title="Next (Down arrow)" :disabled="activeIndex >= videos.length - 1" @click="scrollByOne(1)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
     </div>
 
-    <div v-else-if="loading" class="feed-state">
-      <span class="spinner" />
-      <p>Loading videos…</p>
+    <div v-else-if="loading" class="feed-state" role="status">
+      <span class="spinner" aria-hidden="true" />
+      <p>Loading media…</p>
     </div>
 
-    <div v-else-if="loadError" class="feed-state">
+    <div v-else-if="loadError" class="feed-state" role="alert">
       <p class="state-title">Couldn’t reach the server</p>
       <p class="state-hint">{{ loadError }}</p>
       <button class="retry-btn" @click="load">Retry</button>
@@ -303,7 +351,7 @@ onBeforeUnmount(() => observer?.disconnect())
       <p class="state-title">Nothing matches this filter</p>
       <p class="state-hint">
         {{ favoritesOnly && !activeFolder
-          ? 'Tap ♡ on a reel to add it to your favorites.'
+          ? 'Use the Favorite button on a reel to save it here.'
           : 'Try another folder or clear the filter.' }}
       </p>
       <button class="retry-btn" @click="clearFilters">Show everything</button>
