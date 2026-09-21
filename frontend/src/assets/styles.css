@@ -673,13 +673,13 @@ button:disabled, select:disabled {
 }
 
 .reel--transport .reel-meta {
-  bottom: calc(106px + env(safe-area-inset-bottom));
+  bottom: calc(88px + env(safe-area-inset-bottom));
   padding-right: 80px;
 }
 
 .reel-actions {
   right: clamp(16px, 3vw, 40px);
-  bottom: calc(148px + env(safe-area-inset-bottom));
+  bottom: calc(124px + env(safe-area-inset-bottom));
   gap: 10px;
 }
 
@@ -694,25 +694,27 @@ button:disabled, select:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 8px;
+  gap: 6px;
+  padding: 6px;
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: 16px;
   background: rgba(21, 21, 31, 0.92);
   backdrop-filter: blur(16px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 
 .transport-btn {
-  min-width: 52px;
-  border-radius: 12px;
-  padding: 10px;
+  min-width: 40px;
+  min-height: 33px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 9px;
   color: var(--text);
   background: rgba(255, 255, 255, 0.06);
 }
 
 .transport-btn--primary {
-  min-width: 68px;
+  min-width: 52px;
   background: #efe5ff;
   color: #241535;
   border-color: transparent;
@@ -993,13 +995,13 @@ button:disabled, select:disabled {
 
   .player-transport {
     gap: 4px;
-    padding: 6px;
+    padding: 4px;
     max-width: calc(100% - 16px);
   }
 
   .transport-time {
-    padding: 0 4px;
-    font-size: 11px;
+    padding: 0 2px;
+    font-size: 10px;
   }
 
   .config-row {
