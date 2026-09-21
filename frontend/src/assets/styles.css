@@ -666,6 +666,20 @@ button:disabled, select:disabled {
   pointer-events: none;
 }
 
+.reel--video {
+  --transport-strip: 92px;
+}
+
+.reel--video .reel-video,
+.reel--video .reel-image {
+  height: calc(90% - var(--transport-strip));
+}
+
+.reel--video .rot-90,
+.reel--video .rot-270 {
+  width: calc(90dvh - var(--transport-strip));
+}
+
 .reel-meta {
   z-index: 2;
   bottom: calc(24px + env(safe-area-inset-bottom));

@@ -244,7 +244,7 @@ defineExpose({ toggle, seekBy, isTracking })
 </script>
 
 <template>
-  <section class="reel" :class="{ 'reel--transport': active && mount && !isImage }" :data-index="index" :aria-label="video.filename">
+  <section class="reel" :class="{ 'reel--video': mount && !isImage }" :data-index="index" :aria-label="video.filename">
     <template v-if="mount">
       <img
         v-if="isImage"
