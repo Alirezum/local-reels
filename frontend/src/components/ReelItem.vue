@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { canSeek, canTrackPlayback, formatPlaybackTime, seekTarget } from '../playback.js'
+import { canSeek, canTrackPlayback, seekTarget } from '../playback.js'
 
 const props = defineProps({
   video: { type: Object, required: true },
@@ -11,7 +11,7 @@ const props = defineProps({
   muted: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['state', 'error', 'favorite', 'block'])
+const emit = defineEmits(['state', 'error'])
 
 const videoEl = ref(null)
 const playing = ref(false)
@@ -240,7 +240,7 @@ function isTracking() {
     : canTrackPlayback(mediaState()))
 }
 
-defineExpose({ toggle, seekBy, isTracking })
+defineExpose({ toggle, seekBy, isTracking, videoEl })
 </script>
 
 <template>
@@ -294,34 +294,6 @@ defineExpose({ toggle, seekBy, isTracking })
     <div v-if="mount" class="reel-meta">
       <span class="reel-name" :title="video.relpath">{{ video.relpath }}</span>
       <span v-if="isImage" class="reel-duration">Photo</span>
-    </div>
-
-    <div v-if="active && mount" class="reel-actions" role="group" aria-label="Media actions">
-      <button
-        type="button"
-        class="action-btn"
-        :class="{ 'action-btn--on': video.favorite }"
-        :aria-pressed="!!video.favorite"
-        aria-label="Favorite"
-        :title="video.favorite ? 'Remove from favorites' : 'Add to favorites'"
-        @click.stop="emit('favorite', video)"
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" :fill="video.favorite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
-          <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" />
-        </svg>
-      </button>
-      <button type="button" class="action-btn" aria-label="Hide this file from the feed" title="Don’t show this again" @click.stop="emit('block', video)">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
-          <circle cx="12" cy="12" r="9" /><path d="m6 6 12 12" />
-        </svg>
-      </button>
-    </div>
-
-    <div v-if="active && mount && !isImage" class="player-transport" role="group" aria-label="Video playback controls" @click.stop>
-      <button type="button" class="fav-filter-btn transport-btn" :disabled="!seekable" aria-label="Seek backward 5 seconds" title="Back 5 seconds (Left arrow)" @click="seekBy(-5)">-5s</button>
-      <button type="button" class="fav-filter-btn transport-btn transport-btn--primary" :disabled="!seekable" :aria-label="playing ? 'Pause video' : 'Play video'" title="Play or pause (Space)" @click="toggle">{{ playing ? 'Pause' : 'Play' }}</button>
-      <button type="button" class="fav-filter-btn transport-btn" :disabled="!seekable" aria-label="Seek forward 5 seconds" title="Forward 5 seconds (Right arrow)" @click="seekBy(5)">+5s</button>
-      <span class="transport-time" :aria-label="`Elapsed ${formatPlaybackTime(currentTime)} of ${formatPlaybackTime(duration)}`">{{ formatPlaybackTime(currentTime) }} / {{ formatPlaybackTime(duration) }}</span>
     </div>
 
     <div v-if="mount && !isImage" class="progress" aria-hidden="true">
