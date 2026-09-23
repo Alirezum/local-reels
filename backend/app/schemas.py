@@ -23,6 +23,11 @@ class FlagIn(BaseModel):
     blocked: bool | None = None
 
 
+class MoveIn(BaseModel):
+    video_id: str
+    folder: str = ""
+
+
 class FolderOut(BaseModel):
     name: str
     count: int

@@ -27,6 +27,9 @@ const activeFolder = ref('') // '' = all
 const favoritesOnly = ref(false)
 const folderMenuOpen = ref(false)
 const folderMenuBtn = ref(null)
+const moveMenuOpen = ref(false)
+const moving = ref(false)
+const moveError = ref('')
 
 const tracker = useWatchTracker()
 let observer = null
@@ -224,6 +227,36 @@ async function onBlock(video) {
   loadFolders()
 }
 
+async function moveActiveTo(folder) {
+  const video = activeVideo.value
+  if (!video || moving.value) return
+  moving.value = true
+  moveError.value = ''
+  const currentIndex = activeIndex.value
+  try {
+    await api.moveVideo(video.id, folder)
+    moveMenuOpen.value = false
+    await load()
+    await nextTick()
+    const feed = feedEl.value
+    if (feed) feed.scrollTo({ top: currentIndexAfterReload(currentIndexAfterMove(video, currentIndex)) * feed.clientHeight })
+  } catch (e) {
+    moveError.value = e.message || 'Could not move this file'
+  } finally {
+    moving.value = false
+  }
+}
+
+function currentIndexAfterMove(video, indexBefore) {
+  return videos.value.findIndex((v) => v.id === video.id) >= 0
+    ? videos.value.findIndex((v) => v.id === video.id)
+    : Math.min(indexBefore, videos.value.length - 1)
+}
+
+function currentIndexAfterReload(preferred) {
+  return Math.max(0, Math.min(preferred, videos.value.length - 1))
+}
+
 function toggleMute() {
   muted.value = !muted.value
   localStorage.setItem('lr.muted', muted.value ? '1' : '0')
@@ -281,8 +314,20 @@ function toggleFolderMenu() {
   folderMenuOpen.value = !folderMenuOpen.value
 }
 
+function toggleMoveMenu() {
+  moveError.value = ''
+  moveMenuOpen.value = !moveMenuOpen.value
+}
+
+function topFolderName(video) {
+  if (!video) return ''
+  const relpath = video.relpath || ''
+  return relpath.includes('/') ? relpath.split('/')[0] : ''
+}
+
 function onGlobalClick(ev) {
   if (folderMenuOpen.value && !ev.target.closest?.('.folder-menu')) folderMenuOpen.value = false
+  if (moveMenuOpen.value && !ev.target.closest?.('.move-menu')) moveMenuOpen.value = false
 }
 
 onMounted(() => {
@@ -496,6 +541,40 @@ onBeforeUnmount(() => {
           <circle cx="12" cy="12" r="9" /><path d="m6 6 12 12" />
         </svg>
       </button>
+      <div class="move-menu">
+        <button
+          type="button"
+          class="icon-btn"
+          aria-haspopup="menu"
+          :aria-expanded="moveMenuOpen"
+          aria-label="Move to folder"
+          title="Move to another folder"
+          :disabled="!activeVideo || moving"
+          @click.stop="toggleMoveMenu"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
+            <path d="M3 7V5h6l2 2h10v12H3Z" />
+            <path d="M9 14h6m0 0-2-2m2 2-2 2" />
+          </svg>
+        </button>
+        <div v-if="moveMenuOpen" class="folder-popover" role="menu" aria-label="Move to folder">
+          <p class="move-title">Move “{{ activeVideo?.filename }}” to:</p>
+          <p v-if="moving" class="folder-move-busy" role="status">Moving…</p>
+          <p v-else-if="moveError" class="folder-move-error" role="alert">{{ moveError }}</p>
+          <button v-if="topFolderName(activeVideo)" type="button" class="folder-item" @click="moveActiveTo('')">
+            (root)
+          </button>
+          <button
+            v-for="f in folders.filter((f) => f.name !== topFolderName(activeVideo))"
+            :key="f.name"
+            type="button"
+            class="folder-item"
+            @click="moveActiveTo(f.name)"
+          >
+            {{ f.name }} <span class="folder-count">{{ f.count }}</span>
+          </button>
+        </div>
+      </div>
       <span class="transport-clock" aria-hidden="true">{{ formatPlaybackTime(transportTime.current) }} / {{ formatPlaybackTime(transportTime.duration) }}</span>
     </nav>
 

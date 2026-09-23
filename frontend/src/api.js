@@ -30,6 +30,12 @@ export const api = {
       body: JSON.stringify({ video_id: videoId, ...flags }),
     }).then(handle),
   blocked: () => fetch('/api/blocked').then(handle),
+  moveVideo: (videoId, folder) =>
+    fetch('/api/videos/move', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ video_id: videoId, folder }),
+    }).then(handle),
   recordWatch: (payload, keepalive = false) =>
     fetch('/api/watch', {
       method: 'POST',
