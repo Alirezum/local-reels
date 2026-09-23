@@ -755,6 +755,24 @@ button:disabled, select:disabled {
   color: rgba(255, 255, 255, 0.75);
 }
 
+.move-title {
+  margin: 0;
+  padding: 8px 12px 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.folder-move-busy,
+.folder-move-error {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.folder-move-error {
+  color: #f87171;
+}
+
 .reel::after {
   content: '';
   position: absolute;
@@ -815,6 +833,13 @@ button:disabled, select:disabled {
 .dash-intro {
   flex: 1;
   min-width: 180px;
+}
+
+.dash-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .dash-intro h1 {
