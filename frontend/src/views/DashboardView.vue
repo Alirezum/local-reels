@@ -229,6 +229,45 @@ function setRange(days) {
   loadSection('folders')
 }
 
+const POLL_MS = 60000
+let pollTimer = 0
+const refreshing = ref(false)
+
+function refreshAll() {
+  if (disposed) return
+  for (const key of Object.keys(sections)) loadSection(key)
+}
+
+async function manualRefresh() {
+  if (disposed || refreshing.value) return
+  refreshing.value = true
+  try {
+    refreshAll()
+    await nextTick()
+    while (Object.values(sections).some((s) => s.loading) && !disposed) {
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  } finally {
+    if (!disposed) refreshing.value = false
+  }
+}
+
+function startPolling() {
+  stopPoll()
+  pollTimer = window.setInterval(() => {
+    if (!disposed && document.visibilityState === 'visible' && !Object.values(sections).some((s) => s.loading)) {
+      refreshAll()
+    }
+  }, POLL_MS)
+}
+
+function stopPoll() {
+  if (pollTimer) {
+    window.clearInterval(pollTimer)
+    pollTimer = 0
+  }
+}
+
 async function unhide(item) {
   if (disposed || pendingUnhide.has(item.id)) return
   pendingUnhide.add(item.id)
@@ -259,9 +298,11 @@ async function setMode(m) {
 
 onMounted(() => {
   for (const key of Object.keys(sections)) loadSection(key)
+  startPolling()
 })
 onBeforeUnmount(() => {
   disposed = true
+  stopPoll()
   for (const key of ['activity', 'top', 'folders']) destroyChart(key)
 })
 </script>
@@ -275,7 +316,10 @@ onBeforeUnmount(() => {
         <h1>Dashboard</h1>
         <p class="dash-subtitle">A closer look at what you watch. A little more control over your collection.</p>
       </div>
-      <a href="#dashboard-settings" class="range-btn">Settings</a>
+      <div class="dash-header-actions">
+        <button type="button" class="range-btn" :disabled="refreshing" aria-label="Refresh dashboard data" @click="manualRefresh">{{ refreshing ? 'Refreshing…' : 'Refresh' }}</button>
+        <a href="#dashboard-settings" class="range-btn">Settings</a>
+      </div>
     </header>
 
     <section aria-labelledby="overview-heading" :aria-busy="sections.summary.loading">
