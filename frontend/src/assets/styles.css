@@ -714,6 +714,11 @@ button:disabled, select:disabled {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
+.move-menu .folder-popover {
+  left: auto;
+  right: calc(100% + 12px);
+}
+
 .folder-item {
   display: flex;
   align-items: center;
