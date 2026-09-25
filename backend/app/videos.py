@@ -112,6 +112,11 @@ async def list_folders(request: Request) -> list[FolderOut]:
     for video in videos:
         folder = top_folder(video.relpath)
         counts[folder] = counts.get(folder, 0) + 1
+    video_dir: Path = request.app.state.video_dir
+    if video_dir.is_dir():
+        for entry in sorted(video_dir.iterdir()):
+            if entry.is_dir() and entry.name not in counts and not entry.name.startswith("."):
+                counts[entry.name] = 0
     return sorted(
         (FolderOut(name=k, count=n) for k, n in counts.items()),
         key=lambda f: (f.name == ROOT_FOLDER, f.name.lower()),

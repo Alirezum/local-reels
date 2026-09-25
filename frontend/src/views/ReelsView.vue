@@ -317,6 +317,7 @@ function toggleFolderMenu() {
 function toggleMoveMenu() {
   moveError.value = ''
   moveMenuOpen.value = !moveMenuOpen.value
+  if (moveMenuOpen.value) loadFolders()
 }
 
 function topFolderName(video) {

@@ -23,6 +23,34 @@ def test_move_to_existing_folder_updates_library(client, sandbox, library, sql):
     assert folders == [{"name": "Alpha", "count": 3}, {"name": "beta", "count": 1}]
 
 
+def test_new_empty_folder_is_listed_and_accepts_move(client, sandbox, library):
+    before = client.get("/api/videos/folders").json()
+    assert "New folder" not in {folder["name"] for folder in before}
+    target = sandbox.media_dir / "New folder"
+    target.mkdir()
+    folders = client.get("/api/videos/folders").json()
+    assert {"name": "New folder", "count": 0} in folders
+    assert all(folder in folders for folder in before)
+    response = client.post(
+        "/api/videos/move",
+        json={"video_id": library["root.mp4"]["id"], "folder": "New folder"},
+    )
+    assert response.status_code == 200
+    assert response.json()["relpath"] == "New folder/root.mp4"
+    assert (target / "root.mp4").is_file()
+    assert {"name": "New folder", "count": 1} in client.get("/api/videos/folders").json()
+
+
+def test_folder_listing_tracks_empty_directories_without_rescan(client, sandbox):
+    target = sandbox.media_dir / "Empty"
+    target.mkdir()
+    (sandbox.media_dir / ".hidden").mkdir()
+    (sandbox.media_dir / "not-a-folder.txt").write_text("text")
+    assert client.get("/api/videos/folders").json() == [{"name": "Empty", "count": 0}]
+    target.rmdir()
+    assert client.get("/api/videos/folders").json() == []
+
+
 def test_move_preserves_history_flags_and_created_at(client, sandbox, library, sql):
     root_id = library["root.mp4"]["id"]
     original_created = library["root.mp4"]["created_at"]
