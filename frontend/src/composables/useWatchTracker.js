@@ -11,6 +11,36 @@ export function useWatchTracker() {
   let accumulated = 0
   let lastSample = performance.now()
   let timer = null
+  const pending = new Set()
+  const moves = new Map()
+
+  async function record(payload, keepalive) {
+    const move = moves.get(payload.video_id)
+    if (move) payload.video_id = await move
+    const request = api.recordWatch(payload, keepalive)
+    pending.add(request)
+    try {
+      await request
+    } finally {
+      pending.delete(request)
+    }
+  }
+
+  async function relocate(videoId, move) {
+    let release
+    moves.set(videoId, new Promise((resolve) => { release = resolve }))
+    let nextId = videoId
+    try {
+      await Promise.allSettled([...pending])
+      const result = await move()
+      nextId = result.id
+      if (currentId === videoId) currentId = nextId
+      return result
+    } finally {
+      moves.delete(videoId)
+      release(nextId)
+    }
+  }
 
   function sample() {
     const now = performance.now()
@@ -30,7 +60,7 @@ export function useWatchTracker() {
     const end = Date.now() / 1000
     accumulated = 0
     try {
-      await api.recordWatch(
+      await record(
         { video_id: currentId, start_time: end - duration, end_time: end, duration_watched: duration },
         keepalive,
       )
@@ -78,5 +108,5 @@ export function useWatchTracker() {
     flush(true)
   })
 
-  return { setActive, setPlaying }
+  return { setActive, setPlaying, relocate }
 }
