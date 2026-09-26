@@ -25,6 +25,7 @@ const playbackMessage = ref('')
 let tracking = false
 let playRequest = 0
 let disposed = false
+let resumeState = null
 
 const isImage = computed(() => props.video.type === 'image')
 const progress = computed(() => Number.isFinite(duration.value) && duration.value > 0
@@ -97,6 +98,7 @@ function requestPlay() {
 
 watch([() => props.active, () => props.mount, videoEl], ([active, mount, v], previous) => {
   ++playRequest
+  if (previous?.[2] && previous[2] !== v) resumeState = null
   setTracking(false)
   playing.value = false
   if (previous?.[2] && previous[2] !== v) previous[2].pause()
@@ -124,12 +126,27 @@ watch([() => props.active, () => props.mount, videoEl], ([active, mount, v], pre
   }
 }, { flush: 'post', immediate: true })
 
+watch(() => props.video.url, (next, prev) => {
+  if (!next || next === prev || isImage.value) return
+  const v = videoEl.value
+  if (!v || !props.mount) return
+  resumeState = {
+    time: Number.isFinite(v.currentTime) ? v.currentTime : 0,
+    paused: v.paused,
+    rate: v.playbackRate || 1,
+  }
+  waiting.value = true
+  seeking.value = false
+  setTracking(false)
+})
+
 watch(() => props.muted, (muted) => {
   if (videoEl.value) videoEl.value.muted = muted
 })
 
 onBeforeUnmount(() => {
   disposed = true
+  resumeState = null
   ++playRequest
   setTracking(false)
   videoEl.value?.pause()
@@ -216,6 +233,21 @@ function onSeeked(event) {
 
 function onLoaded(event) {
   if (!isCurrentEvent(event)) return
+  if (resumeState && event.target.readyState >= 1) {
+    const saved = resumeState
+    resumeState = null
+    try {
+      event.target.playbackRate = saved.rate
+      if (Number.isFinite(event.target.duration) && event.target.duration > 0) {
+        event.target.currentTime = Math.min(saved.time, event.target.duration)
+      }
+    } catch {
+      // keep new source at 0 when the browser rejects the restore
+    }
+    syncTime()
+    if (!saved.paused && props.active && !disposed) requestPlay()
+    return
+  }
   syncTime()
   if (event.target.paused && event.target.readyState >= 2) waiting.value = false
 }

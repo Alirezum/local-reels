@@ -34,6 +34,7 @@ const moveError = ref('')
 const tracker = useWatchTracker()
 let observer = null
 let loadVersion = 0
+let nextQueueKey = 0
 let disposed = false
 
 const activeVideo = computed(() => videos.value[activeIndex.value] ?? null)
@@ -100,11 +101,11 @@ function bindObserver() {
 async function fetchBatch(version = loadVersion) {
   const fresh = await api.randomVideos(BATCH, order.value, currentFilters())
   if (disposed || version !== loadVersion || !fresh.length) return 0
-  const recent = new Set(videos.value.slice(-60).map((v) => v.id))
-  let pool = fresh.filter((v) => !brokenIds.has(v.id) && !recent.has(v.id))
+  const recent = new Set(videos.value.slice(-60).flatMap((v) => [v.id, v.relpath]))
+  let pool = fresh.filter((v) => !brokenIds.has(v.id) && !recent.has(v.id) && !recent.has(v.relpath))
   if (!pool.length) pool = fresh.filter((v) => !brokenIds.has(v.id))
   if (!pool.length) pool = fresh
-  videos.value = [...videos.value, ...pool]
+  videos.value = [...videos.value, ...pool.map((video) => ({ ...video, queueKey: ++nextQueueKey }))]
   return pool.length
 }
 
@@ -232,29 +233,27 @@ async function moveActiveTo(folder) {
   if (!video || moving.value) return
   moving.value = true
   moveError.value = ''
-  const currentIndex = activeIndex.value
+  const oldId = video.id
+  const version = loadVersion
   try {
-    await api.moveVideo(video.id, folder)
+    const moved = await tracker.relocate(oldId, () => api.moveVideo(oldId, folder))
+    if (disposed || version !== loadVersion) return
+    const url = `/videos/${moved.relpath.split('/').map(encodeURIComponent).join('/')}`
+    for (const item of videos.value) {
+      if (item.id === oldId) Object.assign(item, { id: moved.id, relpath: moved.relpath, url })
+    }
+    if (oldId in rotations.value) {
+      rotations.value[moved.id] = rotations.value[oldId]
+      delete rotations.value[oldId]
+    }
+    brokenIds.delete(oldId)
     moveMenuOpen.value = false
-    await load()
-    await nextTick()
-    const feed = feedEl.value
-    if (feed) feed.scrollTo({ top: currentIndexAfterReload(currentIndexAfterMove(video, currentIndex)) * feed.clientHeight })
+    loadFolders(version)
   } catch (e) {
-    moveError.value = e.message || 'Could not move this file'
+    if (!disposed && version === loadVersion) moveError.value = e.message || 'Could not move this file'
   } finally {
-    moving.value = false
+    if (!disposed) moving.value = false
   }
-}
-
-function currentIndexAfterMove(video, indexBefore) {
-  return videos.value.findIndex((v) => v.id === video.id) >= 0
-    ? videos.value.findIndex((v) => v.id === video.id)
-    : Math.min(indexBefore, videos.value.length - 1)
-}
-
-function currentIndexAfterReload(preferred) {
-  return Math.max(0, Math.min(preferred, videos.value.length - 1))
 }
 
 function toggleMute() {
@@ -317,6 +316,7 @@ function toggleFolderMenu() {
 function toggleMoveMenu() {
   moveError.value = ''
   moveMenuOpen.value = !moveMenuOpen.value
+  if (moveMenuOpen.value) loadFolders()
 }
 
 function topFolderName(video) {
@@ -354,7 +354,7 @@ onBeforeUnmount(() => {
     <main v-if="videos.length" ref="feedEl" class="feed" aria-label="Media feed" :aria-busy="loading">
       <ReelItem
         v-for="(video, i) in videos"
-        :key="`${video.id}-${i}`"
+        :key="video.queueKey"
         :ref="(c) => (reelComps[i] = c)"
         :video="video"
         :index="i"
