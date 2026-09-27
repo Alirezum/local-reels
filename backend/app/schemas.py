@@ -73,3 +73,25 @@ class FolderStatOut(BaseModel):
     folder: str
     watch_seconds: float
     views: int
+
+
+class BatchNewIn(BaseModel):
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    size: int = Field(ge=1, le=500)
+    folder: str | None = None
+
+
+class BatchContinueIn(BaseModel):
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    from_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class BatchAddIn(BaseModel):
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class BatchOut(BaseModel):
+    date: str
+    size: int
+    folder: str | None = None
+    videos: list[VideoOut]

@@ -47,6 +47,14 @@ CREATE TABLE IF NOT EXISTS user_flags (
     blocked    INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS daily_batches (
+    date       TEXT PRIMARY KEY,
+    size       INTEGER NOT NULL,
+    folder     TEXT,
+    video_ids  TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+);
 """
 
 
