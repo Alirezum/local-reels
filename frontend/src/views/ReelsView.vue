@@ -457,6 +457,11 @@ onBeforeUnmount(() => {
           <path d="M17 4v9m0 0 3-3m-3 3-3-3" />
         </svg>
       </button>
+      <RouterLink to="/batch" class="icon-btn" aria-label="Open daily batch" title="Daily batch (fixed set for today)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
+          <path d="M8 6h12M8 12h12M8 18h12" /><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01" />
+        </svg>
+      </RouterLink>
       <button type="button" class="icon-btn" aria-label="Rotate active media 90 degrees" title="Rotate active (R)" :disabled="!videos.length || loading" @click="rotateActive">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
           <path d="M20 11a8 8 0 1 0-2 6M20 4v7h-7" />
