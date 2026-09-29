@@ -1083,3 +1083,135 @@ button:disabled, select:disabled {
     font-size: 22px;
   }
 }
+
+/* ---------- Daily batch ---------- */
+
+.batch-bar {
+  position: absolute;
+  top: calc(14px + env(safe-area-inset-top));
+  left: 16px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-chip {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--text);
+  background: rgba(20, 20, 24, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 14px;
+}
+
+.batch-btn {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  background: rgba(20, 20, 24, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.batch-btn:hover:not(:disabled) {
+  background: rgba(45, 45, 52, 0.8);
+}
+
+.batch-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.batch-error {
+  position: absolute;
+  top: calc(64px + env(safe-area-inset-top));
+  left: 16px;
+  z-index: 10;
+  margin: 0;
+  font-size: 13px;
+  color: #ff8a8a;
+  background: rgba(20, 20, 24, 0.8);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  max-width: min(420px, calc(100vw - 32px));
+}
+
+.batch-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(5, 5, 10, 0.72);
+}
+
+.batch-card {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 26px 24px;
+  text-align: center;
+}
+
+.batch-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.batch-row .retry-btn {
+  text-decoration: none;
+}
+
+.feed-state .retry-btn {
+  text-decoration: none;
+}
+
+.batch-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.batch-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  padding: 10px 12px;
+}
+
+.batch-end {
+  height: 100dvh;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+}

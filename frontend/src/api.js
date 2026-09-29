@@ -7,7 +7,9 @@ async function handle(res) {
       const body = await res.json()
       if (body.detail) detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
     } catch { /* ignore */ }
-    throw new Error(detail)
+    const error = new Error(detail)
+    error.status = res.status
+    throw error
   }
   return res.json()
 }
@@ -23,6 +25,30 @@ export const api = {
     return fetch(`/api/videos/random?${params}`).then(handle)
   },
   folders: () => fetch('/api/videos/folders').then(handle),
+  batchGet: (date) => fetch(`/api/batch?date=${encodeURIComponent(date)}`).then(handle),
+  batchPrevious: (before) => fetch(`/api/batch/previous?before=${encodeURIComponent(before)}`).then(handle),
+  batchNew: (date, size, folder) =>
+    fetch('/api/batch/new', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ date, size, ...(folder ? { folder } : {}) }),
+    }).then(handle),
+  batchContinue: (date, fromDate) =>
+    fetch('/api/batch/continue', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ date, from_date: fromDate }),
+    }).then(handle),
+  batchAddRandom: (date) =>
+    fetch('/api/batch/add-random', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ date }),
+    }).then(handle),
+  batchRemove: (date, videoId) =>
+    fetch(`/api/batch/${encodeURIComponent(date)}/${encodeURIComponent(videoId)}`, {
+      method: 'DELETE',
+    }).then(handle),
   setFlags: (videoId, flags) =>
     fetch('/api/flags', {
       method: 'POST',
