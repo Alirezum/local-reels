@@ -126,14 +126,16 @@ async function enterFeed(updated, version) {
   batch.value = updated
   videos.value = withQueueKeys(updated.videos)
   activeIndex.value = 0
-  observer?.disconnect()
   tracker.setPlaying(false)
   tracker.setActive(videos.value[0]?.id ?? null)
+  // Render the feed first: bindObserver needs feedEl to exist.
+  phase.value = videos.value.length ? 'feed' : 'empty'
+  if (!videos.value.length) return
+  observer?.disconnect()
   await nextTick()
   if (disposed || version !== loadVersion) return
   bindObserver()
   tracker.setPlaying(reelComps.value[0]?.isTracking() ?? false)
-  phase.value = videos.value.length ? 'feed' : 'empty'
 }
 
 async function load() {
@@ -235,16 +237,21 @@ async function addRandom() {
   try {
     const updated = await api.batchAddRandom(batchDate)
     if (disposed || version !== loadVersion) return
+    const wasEmpty = phase.value !== 'feed'
     batch.value = updated
     videos.value = withQueueKeys(updated.videos)
+    if (wasEmpty) {
+      activeIndex.value = 0
+      tracker.setPlaying(false)
+      tracker.setActive(videos.value[0]?.id ?? null)
+      if (!videos.value.length) return
+      // Render the feed first: bindObserver needs feedEl to exist.
+      phase.value = 'feed'
+    }
     await nextTick()
     if (disposed || version !== loadVersion) return
     bindObserver()
-    if (phase.value === 'empty' && videos.value.length) {
-      activeIndex.value = 0
-      tracker.setActive(videos.value[0]?.id ?? null)
-      phase.value = 'feed'
-    }
+    if (wasEmpty) tracker.setPlaying(reelComps.value[0]?.isTracking() ?? false)
   } catch (e) {
     if (!disposed && version === loadVersion) actionError.value = e.message
   } finally {
