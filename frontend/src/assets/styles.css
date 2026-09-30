@@ -1201,17 +1201,3 @@ button:disabled, select:disabled {
   font-size: 15px;
   padding: 10px 12px;
 }
-
-.batch-end {
-  height: 100dvh;
-  scroll-snap-align: start;
-  scroll-snap-stop: always;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 24px;
-  text-align: center;
-  color: var(--muted);
-}

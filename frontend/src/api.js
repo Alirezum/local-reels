@@ -49,6 +49,12 @@ export const api = {
     fetch(`/api/batch/${encodeURIComponent(date)}/${encodeURIComponent(videoId)}`, {
       method: 'DELETE',
     }).then(handle),
+  batchReplace: (date, oldId, newId) =>
+    fetch('/api/batch/replace', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ date, old_id: oldId, new_id: newId }),
+    }).then(handle),
   setFlags: (videoId, flags) =>
     fetch('/api/flags', {
       method: 'POST',

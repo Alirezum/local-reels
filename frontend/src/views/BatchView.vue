@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import ReelItem from '../components/ReelItem.vue'
 import { api } from '../api.js'
@@ -7,6 +7,8 @@ import { useWatchTracker } from '../composables/useWatchTracker.js'
 import { formatPlaybackTime, keyboardAction } from '../playback.js'
 
 const MOUNT_WINDOW = 2 // only active ± this render a real <video>/<img>
+const AHEAD = 8 // queue the next shuffled round when this few slides remain
+const MAX_SLIDES = 120 // trim slides far behind so an endless session stays light
 const SIZE_KEY = 'lr.batchSize'
 const FOLDER_KEY = 'lr.batchFolder'
 
@@ -56,7 +58,11 @@ const transportPlaying = ref(false)
 let transportTimer = 0
 
 const scopeLabel = computed(() => batch.value?.folder || 'All folders')
-const positionLabel = computed(() => (videos.value.length ? `${activeIndex.value + 1}/${videos.value.length}` : '0/0'))
+const positionLabel = computed(() => {
+  const total = batch.value?.videos.length ?? 0
+  if (!videos.value.length || !total) return '0/0'
+  return `${(activeIndex.value % total) + 1}/${total}`
+})
 
 function syncTransportClock() {
   const comp = reelComps.value[activeIndex.value]
@@ -107,10 +113,61 @@ function bindObserver() {
   for (const node of feedEl.value.querySelectorAll('.reel')) observer.observe(node)
 }
 
-function withQueueKeys(items) {
-  const keys = new Map(videos.value.map((v) => [v.id, v.queueKey]))
-  return items.map((video) => ({ ...video, queueKey: keys.get(video.id) ?? ++nextQueueKey }))
+function shuffledRound(pool) {
+  const usable = pool.filter((v) => !brokenIds.has(v.id))
+  const source = usable.length ? usable : [...pool]
+  const round = [...source]
+  for (let i = round.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[round[i], round[j]] = [round[j], round[i]]
+  }
+  // Avoid playing the same video twice in a row across the round boundary.
+  const lastId = videos.value[videos.value.length - 1]?.id
+  if (round.length > 1 && lastId && round[0].id === lastId) {
+    const swap = round.findIndex((v) => v.id !== lastId)
+    if (swap > 0) [round[0], round[swap]] = [round[swap], round[0]]
+  }
+  return round.map((video) => ({ ...video, queueKey: ++nextQueueKey }))
 }
+
+function trimFront() {
+  const excess = videos.value.length - MAX_SLIDES
+  if (excess <= 0) return 0
+  videos.value = videos.value.slice(excess)
+  activeIndex.value = Math.max(0, activeIndex.value - excess)
+  return excess
+}
+
+function syncScrollAfterTrim(excess) {
+  const feed = feedEl.value
+  if (excess > 0 && feed) feed.scrollTop -= excess * feed.clientHeight
+}
+
+function appendRound() {
+  const pool = batch.value?.videos ?? []
+  if (!pool.length) return false
+  videos.value = [...videos.value, ...shuffledRound(pool)]
+  return true
+}
+
+let appending = false
+async function maybeAppendRound() {
+  if (disposed || phase.value !== 'feed' || appending || !videos.value.length) return
+  if (videos.value.length - activeIndex.value - 1 > AHEAD) return
+  appending = true
+  try {
+    if (!appendRound()) return
+    const trimmed = trimFront()
+    await nextTick()
+    if (disposed) return
+    syncScrollAfterTrim(trimmed)
+    bindObserver()
+  } finally {
+    appending = false
+  }
+}
+
+watch(activeIndex, maybeAppendRound)
 
 async function loadFolders(version = loadVersion) {
   try {
@@ -124,18 +181,21 @@ async function loadFolders(version = loadVersion) {
 async function enterFeed(updated, version) {
   if (disposed || version !== loadVersion) return
   batch.value = updated
-  videos.value = withQueueKeys(updated.videos)
+  videos.value = []
   activeIndex.value = 0
   tracker.setPlaying(false)
-  tracker.setActive(videos.value[0]?.id ?? null)
+  const round = shuffledRound(updated.videos)
+  videos.value = round
+  tracker.setActive(round[0]?.id ?? null)
   // Render the feed first: bindObserver needs feedEl to exist.
-  phase.value = videos.value.length ? 'feed' : 'empty'
-  if (!videos.value.length) return
+  phase.value = round.length ? 'feed' : 'empty'
+  if (!round.length) return
   observer?.disconnect()
   await nextTick()
   if (disposed || version !== loadVersion) return
   bindObserver()
   tracker.setPlaying(reelComps.value[0]?.isTracking() ?? false)
+  maybeAppendRound()
 }
 
 async function load() {
@@ -237,21 +297,40 @@ async function addRandom() {
   try {
     const updated = await api.batchAddRandom(batchDate)
     if (disposed || version !== loadVersion) return
-    const wasEmpty = phase.value !== 'feed'
     batch.value = updated
-    videos.value = withQueueKeys(updated.videos)
-    if (wasEmpty) {
+    if (phase.value !== 'feed') {
+      // Refilling an emptied batch: start a fresh shuffled round.
       activeIndex.value = 0
       tracker.setPlaying(false)
-      tracker.setActive(videos.value[0]?.id ?? null)
-      if (!videos.value.length) return
-      // Render the feed first: bindObserver needs feedEl to exist.
+      const round = shuffledRound(updated.videos)
+      videos.value = round
+      if (!round.length) return
+      tracker.setActive(round[0]?.id ?? null)
       phase.value = 'feed'
+      await nextTick()
+      if (disposed || version !== loadVersion) return
+      bindObserver()
+      tracker.setPlaying(reelComps.value[0]?.isTracking() ?? false)
+      maybeAppendRound()
+      return
     }
+    // Slip the new video(s) in right after the current slide so they show
+    // up promptly; later rounds pick up the full updated batch anyway.
+    const known = new Set(videos.value.map((v) => v.id))
+    const fresh = updated.videos
+      .filter((v) => !known.has(v.id))
+      .map((v) => ({ ...v, queueKey: ++nextQueueKey }))
+    if (!fresh.length) return
+    videos.value = [
+      ...videos.value.slice(0, activeIndex.value + 1),
+      ...fresh,
+      ...videos.value.slice(activeIndex.value + 1),
+    ]
+    const trimmed = trimFront()
     await nextTick()
     if (disposed || version !== loadVersion) return
+    syncScrollAfterTrim(trimmed)
     bindObserver()
-    if (wasEmpty) tracker.setPlaying(reelComps.value[0]?.isTracking() ?? false)
   } catch (e) {
     if (!disposed && version === loadVersion) actionError.value = e.message
   } finally {
@@ -339,6 +418,21 @@ async function moveActiveTo(folder) {
     const url = `/videos/${moved.relpath.split('/').map(encodeURIComponent).join('/')}`
     for (const item of videos.value) {
       if (item.id === oldId) Object.assign(item, { id: moved.id, relpath: moved.relpath, url })
+    }
+    // A move gives the file a new ID: swap it inside the stored batch too,
+    // otherwise future rounds (and tomorrow's reload) lose this video.
+    if (batch.value) {
+      for (const item of batch.value.videos) {
+        if (item.id === oldId) Object.assign(item, { id: moved.id, relpath: moved.relpath, url })
+      }
+      try {
+        const updated = await api.batchReplace(batchDate, oldId, moved.id)
+        if (!disposed && version === loadVersion) batch.value = updated
+      } catch (e) {
+        if (!disposed && version === loadVersion) {
+          actionError.value = 'Moved, but the batch bookmark could not be updated — reload to resync.'
+        }
+      }
     }
     if (oldId in rotations.value) {
       rotations.value[moved.id] = rotations.value[oldId]
@@ -459,11 +553,6 @@ onBeforeUnmount(() => {
         @state="onReelState"
         @error="onReelError"
       />
-      <section class="batch-end" aria-label="End of batch">
-        <p class="state-title">End of today's batch 🎬</p>
-        <p class="state-hint">You watched all {{ videos.length }} videos.</p>
-        <button class="retry-btn" :disabled="busy" @click="addRandom">Add a random video</button>
-      </section>
     </main>
 
     <nav v-if="phase === 'feed' && videos.length" class="side-rail side-rail--left" aria-label="Batch navigation">
