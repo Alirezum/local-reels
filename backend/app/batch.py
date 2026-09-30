@@ -16,7 +16,7 @@ import aiosqlite
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from .scan import sync_directory
-from .schemas import BatchAddIn, BatchContinueIn, BatchNewIn, BatchOut
+from .schemas import BatchAddIn, BatchContinueIn, BatchNewIn, BatchOut, BatchReplaceIn
 from .videos import fetch_videos
 
 router = APIRouter(prefix="/api/batch", tags=["batch"])
@@ -171,4 +171,28 @@ async def remove_from_batch(date: str, video_id: str, request: Request) -> Batch
     await _store_batch(conn, date=row["date"], size=row["size"], folder=row["folder"], ids=ids)
     updated = await _read_row(conn, date)
     assert updated is not None
+    return await _batch_out(conn, updated)
+
+
+@router.post("/replace", response_model=BatchOut)
+async def replace_in_batch(payload: BatchReplaceIn, request: Request) -> BatchOut:
+    """Swap one stored video ID for another (e.g. after moving a file, which
+    gives it a new ID), keeping its position in the batch."""
+    conn: aiosqlite.Connection = request.app.state.conn
+    row = await _read_row(conn, payload.date)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No batch for this date")
+    ids: list[str] = list(json.loads(row["video_ids"]))
+    if payload.old_id not in ids:
+        raise HTTPException(status_code=404, detail="Video is not in this batch")
+    async with conn.execute(
+        "SELECT 1 FROM videos WHERE id = ? AND removed = 0", (payload.new_id,)
+    ) as cur:
+        if await cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Unknown video_id")
+    ids = [payload.new_id if video_id == payload.old_id else video_id for video_id in ids]
+    await _store_batch(conn, date=row["date"], size=row["size"], folder=row["folder"], ids=ids)
+    updated = await _read_row(conn, payload.date)
+    assert updated is not None
+    await sync_directory(request.app)
     return await _batch_out(conn, updated)

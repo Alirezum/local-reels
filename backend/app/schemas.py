@@ -90,6 +90,12 @@ class BatchAddIn(BaseModel):
     date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
 
 
+class BatchReplaceIn(BaseModel):
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    old_id: str
+    new_id: str
+
+
 class BatchOut(BaseModel):
     date: str
     size: int

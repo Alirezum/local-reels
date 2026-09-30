@@ -106,6 +106,40 @@ def test_remove_unknown_video_is_404(client, library):
     assert client.delete(f"/api/batch/{TODAY}/nope").status_code == 404
 
 
+def test_replace_keeps_moved_video_in_batch(client, library):
+    batch = client.post("/api/batch/new", json={"date": TODAY, "size": 10}).json()
+    assert len(batch["videos"]) == len(library)
+    old_id = library["root.mp4"]["id"]
+    moved = client.post("/api/videos/move", json={"video_id": old_id, "folder": "Alpha"}).json()
+    assert moved["id"] != old_id
+    # The stored (stale) ID no longer resolves, so the video drops out…
+    assert old_id not in _ids(client.get("/api/batch", params={"date": TODAY}).json())
+    # …until the ID is swapped for the new one, keeping its slot.
+    replaced = client.post(
+        "/api/batch/replace",
+        json={"date": TODAY, "old_id": old_id, "new_id": moved["id"]},
+    ).json()
+    assert _ids(replaced).index(moved["id"]) == _ids(batch).index(old_id)
+    assert len(replaced["videos"]) == len(library)
+    fetched = client.get("/api/batch", params={"date": TODAY}).json()
+    assert moved["id"] in _ids(fetched)
+
+
+def test_replace_unknown_is_404(client, library):
+    client.post("/api/batch/new", json={"date": TODAY, "size": 1})
+    assert (
+        client.post(
+            "/api/batch/replace",
+            json={"date": TODAY, "old_id": "nope", "new_id": "alsono"},
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post("/api/batch/replace", json={"date": "2020-01-01", "old_id": "a", "new_id": "b"}).status_code
+        == 404
+    )
+
+
 def test_batch_validation(client):
     assert client.get("/api/batch", params={"date": "yesterday"}).status_code == 422
     assert client.post("/api/batch/new", json={"date": TODAY, "size": 0}).status_code == 422
