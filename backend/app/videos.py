@@ -32,7 +32,7 @@ def top_folder(relpath: str) -> str:
 async def fetch_videos(
     conn: aiosqlite.Connection,
     *,
-    folder: str | None = None,
+    folder: str | list[str] | None = None,
     favorites_only: bool = False,
     include_blocked: bool = False,
 ) -> list[VideoOut]:
@@ -45,11 +45,19 @@ async def fetch_videos(
     params: list[object] = []
     if not include_blocked:
         sql += " AND COALESCE(f.blocked, 0) = 0"
-    if folder == ROOT_FOLDER:
-        sql += " AND v.filename NOT LIKE '%/%'"
-    elif folder:
-        sql += " AND v.filename LIKE ?"
-        params.append(f"{folder}/%")
+    folders: list[str] = [folder] if isinstance(folder, str) else list(folder or [])
+    folders = [f for f in folders if f]
+    # Dedupe while preserving order.
+    folders = list(dict.fromkeys(folders))
+    if folders:
+        clauses: list[str] = []
+        for name in folders:
+            if name == ROOT_FOLDER:
+                clauses.append("v.filename NOT LIKE '%/%'")
+            else:
+                clauses.append("v.filename LIKE ?")
+                params.append(f"{name}/%")
+        sql += " AND (" + " OR ".join(clauses) + ")"
     if favorites_only:
         sql += " AND COALESCE(f.favorite, 0) = 1"
     sql += " ORDER BY v.filename"
@@ -75,7 +83,7 @@ async def fetch_videos(
 @router.get("", response_model=list[VideoOut])
 async def list_videos(
     request: Request,
-    folder: str | None = Query(default=None),
+    folder: list[str] | None = Query(default=None),
     favorites: bool = Query(default=False),
 ) -> list[VideoOut]:
     conn: aiosqlite.Connection = request.app.state.conn
@@ -88,7 +96,7 @@ async def random_videos(
     request: Request,
     limit: int | None = Query(default=None, ge=1, le=500),
     order: str = Query(default="weighted", pattern="^(weighted|random)$"),
-    folder: str | None = Query(default=None),
+    folder: list[str] | None = Query(default=None),
     favorites: bool = Query(default=False),
 ) -> list[VideoOut]:
     conn: aiosqlite.Connection = request.app.state.conn

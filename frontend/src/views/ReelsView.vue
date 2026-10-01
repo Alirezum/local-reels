@@ -23,7 +23,17 @@ const config = ref(null)
 const brokenIds = new Set()
 const rotations = ref({}) // video id -> degrees, kept for this browser session only
 const folders = ref([])
-const activeFolder = ref('') // '' = all
+function readStoredFolders() {
+  try {
+    const raw = localStorage.getItem('lr.folders')
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((f) => typeof f === 'string' && f) : []
+  } catch {
+    return []
+  }
+}
+const activeFolders = ref(readStoredFolders()) // [] = all
 const favoritesOnly = ref(false)
 const folderMenuOpen = ref(false)
 const folderMenuBtn = ref(null)
@@ -67,10 +77,21 @@ function stopTransportClock() {
   }
 }
 
-const filterActive = computed(() => activeFolder.value !== '' || favoritesOnly.value)
+const filterActive = computed(() => activeFolders.value.length > 0 || favoritesOnly.value)
 
 function currentFilters() {
-  return { folder: activeFolder.value || undefined, favorites: favoritesOnly.value }
+  return {
+    folders: activeFolders.value.length ? [...activeFolders.value] : undefined,
+    favorites: favoritesOnly.value,
+  }
+}
+
+function persistFolders() {
+  try {
+    localStorage.setItem('lr.folders', JSON.stringify(activeFolders.value))
+  } catch {
+    // non-fatal: filtering still works for this session
+  }
 }
 
 function bindObserver() {
@@ -112,7 +133,15 @@ async function fetchBatch(version = loadVersion) {
 async function loadFolders(version = loadVersion) {
   try {
     const result = await api.folders()
-    if (!disposed && version === loadVersion) folders.value = result
+    if (disposed || version !== loadVersion) return
+    folders.value = result
+    // Drop persisted selections for folders that no longer exist.
+    const known = new Set(result.map((f) => f.name))
+    const pruned = activeFolders.value.filter((name) => known.has(name))
+    if (pruned.length !== activeFolders.value.length) {
+      activeFolders.value = pruned
+      persistFolders()
+    }
   } catch {
     if (!disposed && version === loadVersion) folders.value = []
   }
@@ -147,10 +176,23 @@ async function load() {
   }
 }
 
-async function setFolder(name) {
+function isFolderActive(name) {
+  return activeFolders.value.includes(name)
+}
+
+async function toggleFolder(name) {
+  const idx = activeFolders.value.indexOf(name)
+  if (idx >= 0) activeFolders.value = activeFolders.value.filter((f) => f !== name)
+  else activeFolders.value = [...activeFolders.value, name]
+  persistFolders()
+  await load()
+}
+
+async function showAllFolders() {
   folderMenuOpen.value = false
-  if (name === activeFolder.value) return
-  activeFolder.value = name
+  if (!activeFolders.value.length) return
+  activeFolders.value = []
+  persistFolders()
   await load()
 }
 
@@ -161,7 +203,8 @@ async function toggleFavorites() {
 
 async function clearFilters() {
   folderMenuOpen.value = false
-  activeFolder.value = ''
+  activeFolders.value = []
+  persistFolders()
   favoritesOnly.value = false
   await load()
 }
@@ -408,11 +451,13 @@ onBeforeUnmount(() => {
           type="button"
           ref="folderMenuBtn"
           class="icon-btn"
+          :class="{ 'icon-btn--on': activeFolders.length > 0 }"
+          :aria-pressed="activeFolders.length > 0"
           aria-haspopup="menu"
           :aria-expanded="folderMenuOpen"
           aria-label="Filter by folder"
           :disabled="loading"
-          title="Filter by folder"
+          :title="activeFolders.length ? `Folders: ${activeFolders.join(', ')}` : 'Filter by folder'"
           @click.stop="toggleFolderMenu"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
@@ -420,7 +465,7 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <div v-if="folderMenuOpen" class="folder-popover" role="menu" aria-label="Folders">
-          <button type="button" class="folder-item" :class="{ 'folder-item--on': activeFolder === '' }" @click="clearFilters">
+          <button type="button" class="folder-item" :class="{ 'folder-item--on': !activeFolders.length }" @click="showAllFolders">
             All folders <span class="folder-count">{{ folders.reduce((n, f) => n + f.count, 0) }}</span>
           </button>
           <button
@@ -428,9 +473,11 @@ onBeforeUnmount(() => {
             :key="f.name"
             type="button"
             class="folder-item"
-            :class="{ 'folder-item--on': activeFolder === f.name }"
-            @click="setFolder(f.name)"
+            :class="{ 'folder-item--on': isFolderActive(f.name) }"
+            :aria-pressed="isFolderActive(f.name)"
+            @click="toggleFolder(f.name)"
           >
+            <span aria-hidden="true">{{ isFolderActive(f.name) ? '☑' : '☐' }}</span>
             {{ f.name }} <span class="folder-count">{{ f.count }}</span>
           </button>
           <button v-if="filterActive" type="button" class="folder-item folder-item--clear" @click="clearFilters">
@@ -597,7 +644,7 @@ onBeforeUnmount(() => {
     <div v-else-if="filterActive" class="feed-state">
       <p class="state-title">Nothing matches this filter</p>
       <p class="state-hint">
-        {{ favoritesOnly && !activeFolder
+        {{ favoritesOnly && !activeFolders.length
           ? 'Use the Favorite button on a reel to save it here.'
           : 'Try another folder or clear the filter.' }}
       </p>

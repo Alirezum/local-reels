@@ -20,7 +20,14 @@ export const api = {
     const params = new URLSearchParams()
     if (limit) params.set('limit', String(limit))
     params.set('order', order ?? 'weighted')
-    if (filters.folder) params.set('folder', filters.folder)
+    const folders = Array.isArray(filters.folders)
+      ? filters.folders
+      : filters.folder
+        ? [filters.folder]
+        : []
+    for (const folder of folders) {
+      if (folder) params.append('folder', folder)
+    }
     if (filters.favorites) params.set('favorites', 'true')
     return fetch(`/api/videos/random?${params}`).then(handle)
   },
