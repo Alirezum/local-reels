@@ -1,6 +1,25 @@
 import pytest
 
 
+def test_move_keeps_video_in_daily_batches(client, sandbox, library):
+    batch = client.post("/api/batch/new", json={"date": "2026-09-22", "size": 10}).json()
+    assert len(batch["videos"]) == len(library)
+    old_id = library["root.mp4"]["id"]
+    assert old_id in [item["id"] for item in batch["videos"]]
+    response = client.post("/api/videos/move", json={"video_id": old_id, "folder": "beta"})
+    assert response.status_code == 200
+    new_id = response.json()["id"]
+    assert new_id != old_id
+    refetched = client.get("/api/batch", params={"date": "2026-09-22"}).json()
+    ids = [item["id"] for item in refetched["videos"]]
+    assert old_id not in ids
+    assert new_id in ids
+    assert len(refetched["videos"]) == len(batch["videos"])
+    assert [item["relpath"] for item in refetched["videos"] if item["id"] == new_id] == [
+        "beta/root.mp4"
+    ]
+
+
 def test_move_to_existing_folder_updates_library(client, sandbox, library, sql):
     root_id = library["root.mp4"]["id"]
     response = client.post("/api/videos/move", json={"video_id": root_id, "folder": "Alpha"})

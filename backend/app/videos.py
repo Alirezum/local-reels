@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 import shutil
 from pathlib import Path
@@ -249,6 +250,27 @@ def _move_target(root: Path, folder: str, filename: str) -> Path:
     return target_dir / filename
 
 
+async def _remap_batches(
+    conn: aiosqlite.Connection, old_id: str, new_id: str
+) -> None:
+    # A move gives the file a new ID; rewrite stored batch lists so the video
+    # stays in its batches instead of silently dropping out of them.
+    async with conn.execute("SELECT date, video_ids FROM daily_batches") as cur:
+        rows = await cur.fetchall()
+    for row in rows:
+        try:
+            ids = json.loads(row["video_ids"])
+        except (TypeError, ValueError):
+            continue
+        if old_id not in ids:
+            continue
+        remapped = [new_id if video_id == old_id else video_id for video_id in ids]
+        await conn.execute(
+            "UPDATE daily_batches SET video_ids = ? WHERE date = ?",
+            (json.dumps(remapped), row["date"]),
+        )
+
+
 async def _move_file(conn: aiosqlite.Connection, request: Request, payload: MoveIn) -> str:
     root: Path = request.app.state.video_dir
     async with conn.execute(
@@ -293,6 +315,8 @@ async def _move_file(conn: aiosqlite.Connection, request: Request, payload: Move
     await conn.execute(
         "UPDATE user_flags SET video_id = ? WHERE video_id = ?", (new_id, payload.video_id)
     )
+    if new_id != payload.video_id:
+        await _remap_batches(conn, payload.video_id, new_id)
     await conn.commit()
     return new_rel
 

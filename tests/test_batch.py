@@ -106,23 +106,26 @@ def test_remove_unknown_video_is_404(client, library):
     assert client.delete(f"/api/batch/{TODAY}/nope").status_code == 404
 
 
-def test_replace_keeps_moved_video_in_batch(client, library):
+def test_move_keeps_video_in_batch_at_same_position(client, library):
     batch = client.post("/api/batch/new", json={"date": TODAY, "size": 10}).json()
     assert len(batch["videos"]) == len(library)
     old_id = library["root.mp4"]["id"]
+    slot = _ids(batch).index(old_id)
     moved = client.post("/api/videos/move", json={"video_id": old_id, "folder": "Alpha"}).json()
     assert moved["id"] != old_id
-    # The stored (stale) ID no longer resolves, so the video drops out…
-    assert old_id not in _ids(client.get("/api/batch", params={"date": TODAY}).json())
-    # …until the ID is swapped for the new one, keeping its slot.
+    # The move rewrites the stored ID, so the video keeps its slot…
+    refetched = client.get("/api/batch", params={"date": TODAY}).json()
+    assert _ids(refetched).index(moved["id"]) == slot
+    assert len(refetched["videos"]) == len(library)
+    # …and manual replace still works for further swaps.
+    other_id = library["beta/last.webm"]["id"]
+    assert client.delete(f"/api/batch/{TODAY}/{other_id}").status_code == 200
     replaced = client.post(
         "/api/batch/replace",
-        json={"date": TODAY, "old_id": old_id, "new_id": moved["id"]},
+        json={"date": TODAY, "old_id": moved["id"], "new_id": other_id},
     ).json()
-    assert _ids(replaced).index(moved["id"]) == _ids(batch).index(old_id)
-    assert len(replaced["videos"]) == len(library)
-    fetched = client.get("/api/batch", params={"date": TODAY}).json()
-    assert moved["id"] in _ids(fetched)
+    assert _ids(replaced).index(other_id) == slot
+    assert moved["id"] not in _ids(replaced)
 
 
 def test_replace_unknown_is_404(client, library):
