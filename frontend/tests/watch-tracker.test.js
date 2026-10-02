@@ -89,6 +89,29 @@ test('writes during a move use the new id on success and keep navigation', async
   }
 })
 
+test('rapid switches attribute time to the correct videos', async () => {
+  const tracker = useWatchTracker()
+  const original = api.recordWatch
+  const seen = []
+  api.recordWatch = async (payload) => { seen.push({ ...payload }); return {} }
+  try {
+    tracker.setActive('a')
+    tracker.setPlaying(true)
+    advance(1500)
+    tracker.setActive('b')
+    advance(1200)
+    tracker.setActive('c')
+    await new Promise((r) => setTimeout(r, 20))
+    assert.equal(seen.length, 2)
+    assert.deepEqual(
+      seen.map((p) => [p.video_id, p.duration_watched]),
+      [['a', 1.5], ['b', 1.2]],
+    )
+  } finally {
+    api.recordWatch = original
+  }
+})
+
 test('writes during a failed move fall back to the old id', async () => {
   const tracker = useWatchTracker()
   const original = api.recordWatch

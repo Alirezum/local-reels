@@ -50,31 +50,47 @@ export function useWatchTracker() {
     lastSample = now
   }
 
-  async function flush(keepalive = false) {
+  // Capture the pending watch time synchronously and switch state in one
+  // step, so rapid video switches can't interleave attribution. The network
+  // send happens afterwards without blocking the switch.
+  function takePending() {
     sample()
     if (!currentId || accumulated < 0.5) {
       accumulated = 0
-      return
+      return null
     }
     const duration = Math.min(Math.round(accumulated * 10) / 10, 3600)
     const end = Date.now() / 1000
+    const payload = {
+      video_id: currentId,
+      start_time: end - duration,
+      end_time: end,
+      duration_watched: duration,
+    }
     accumulated = 0
+    return payload
+  }
+
+  async function send(payload, keepalive) {
     try {
-      await record(
-        { video_id: currentId, start_time: end - duration, end_time: end, duration_watched: duration },
-        keepalive,
-      )
+      await record(payload, keepalive)
     } catch {
       // Losing a few seconds of stats is acceptable; never block playback.
     }
   }
 
+  function flush(keepalive = false) {
+    const payload = takePending()
+    if (payload) void send(payload, keepalive)
+  }
+
   function setActive(videoId) {
     if (videoId === currentId) return
-    flush(false)
+    const payload = takePending()
     currentId = videoId ?? null
     accumulated = 0
     lastSample = performance.now()
+    if (payload) void send(payload, false)
   }
 
   function setPlaying(value) {
