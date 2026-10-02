@@ -156,9 +156,14 @@ def _plan_metadata(
             old is not None
             and old["size"] == st.st_size
             and abs(old["mtime"] - st.st_mtime) < _MTIME_TOLERANCE_SECONDS
-            and old["duration"] > 0
         ):
-            info["duration"] = old["duration"]  # cached, skip ffprobe
+            # Cached, skip ffprobe — even when the cached duration is 0.
+            # Re-probing zeros on every sync meant one ffprobe subprocess per
+            # request for files without durations (no ffprobe installed or
+            # undecodable files). Note: installing ffprobe later leaves
+            # existing zeros cached until the file changes; touch the file
+            # or reset the DB to refresh durations.
+            info["duration"] = old["duration"]
         else:
             to_probe.append(info)
         infos.append(info)

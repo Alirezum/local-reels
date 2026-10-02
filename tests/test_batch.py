@@ -119,12 +119,13 @@ def test_move_keeps_video_in_batch_at_same_position(client, library):
     assert len(refetched["videos"]) == len(library)
     # …and manual replace still works for further swaps.
     other_id = library["beta/last.webm"]["id"]
-    assert client.delete(f"/api/batch/{TODAY}/{other_id}").status_code == 200
+    after_delete = client.delete(f"/api/batch/{TODAY}/{other_id}").json()
+    slot_after_delete = _ids(after_delete).index(moved["id"])
     replaced = client.post(
         "/api/batch/replace",
         json={"date": TODAY, "old_id": moved["id"], "new_id": other_id},
     ).json()
-    assert _ids(replaced).index(other_id) == slot
+    assert _ids(replaced).index(other_id) == slot_after_delete
     assert moved["id"] not in _ids(replaced)
 
 

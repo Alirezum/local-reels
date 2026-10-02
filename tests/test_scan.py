@@ -55,13 +55,13 @@ def test_directory_change_preserves_relative_path_identity(client, sandbox, libr
     ]
 
 
-def test_zero_duration_is_reprobed(client, sandbox):
+def test_zero_duration_is_cached(client, sandbox):
     path = sandbox.media_dir / "unknown.mp4"
     path.write_bytes(b"unknown")
     sandbox.durations[path.name] = 0
     assert client.get("/api/videos").json()[0]["duration"] == 0
     assert client.get("/api/videos").json()[0]["duration"] == 0
-    assert sandbox.probes == [path, path]
+    assert sandbox.probes == [path]
 
 
 def test_recursive_scan_skips_hidden_unsupported_and_symlink_directories(client, sandbox):
