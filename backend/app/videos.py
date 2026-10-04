@@ -1,29 +1,34 @@
-"""Video listing, user flags (favorite / blocked), file moves and runtime configuration."""
+"""Video listing endpoints."""
 
 from __future__ import annotations
 
-import json
 import random
-import shutil
 from pathlib import Path
 from urllib.parse import quote
 
 import aiosqlite
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 
-from .db import set_setting
-from .scan import sync_directory, video_id_for
-from .schemas import ConfigIn, ConfigOut, FlagIn, FolderOut, MoveIn, VideoOut
-from .stats import SESSIONS_CTE
+from .scan import sync_directory
+from .schemas import FolderOut, VideoOut
+from .weights import fetch_view_weights, weighted_sample_without_replacement
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
-config_router = APIRouter(prefix="/api/config", tags=["config"])
-flag_router = APIRouter(tags=["flags"])
 
 ROOT_FOLDER = "(root)"
-_DEFAULT_WEIGHT = 1.0
-_SECONDS_PER_MINUTE = 60.0
-_WATCHED_MINUTES_DIVISOR = 5.0
+
+# Re-exported for backward compatibility (tests import from here).
+__all__ = [
+    "ROOT_FOLDER",
+    "router",
+    "top_folder",
+    "fetch_videos",
+    "list_videos",
+    "random_videos",
+    "list_folders",
+    "fetch_view_weights",
+    "weighted_sample_without_replacement",
+]
 
 
 def top_folder(relpath: str) -> str:
@@ -130,225 +135,3 @@ async def list_folders(request: Request) -> list[FolderOut]:
         (FolderOut(name=k, count=n) for k, n in counts.items()),
         key=lambda f: (f.name == ROOT_FOLDER, f.name.lower()),
     )
-
-
-async def fetch_view_weights(conn: aiosqlite.Connection) -> dict[str, float]:
-    """Per-video discovery weight: less-watched -> higher weight.
-
-    weight = 1 / (1 + view_sessions + watched_minutes / 5). Never-seen media
-    score 1.0; a heavily watched clip scores near 0.
-    """
-    sql = (
-        SESSIONS_CTE + "SELECT video_id, SUM(is_new_view) AS views, "
-        "SUM(duration_watched) AS seconds FROM sessions GROUP BY video_id"
-    )
-    async with conn.execute(sql) as cur:
-        rows = await cur.fetchall()
-    return {
-        row["video_id"]: _DEFAULT_WEIGHT
-        / (
-            _DEFAULT_WEIGHT
-            + float(row["views"])
-            + float(row["seconds"]) / _SECONDS_PER_MINUTE / _WATCHED_MINUTES_DIVISOR
-        )
-        for row in rows
-    }
-
-
-def weighted_sample_without_replacement(
-    videos: list[VideoOut], weights: dict[str, float]
-) -> list[VideoOut]:
-    pool = list(videos)
-    remaining_weights = [weights.get(video.id, _DEFAULT_WEIGHT) for video in pool]
-    picked: list[VideoOut] = []
-    while pool:
-        total_weight = sum(remaining_weights)
-        if total_weight <= 0:
-            random.shuffle(pool)
-            picked.extend(pool)
-            break
-        threshold = random.uniform(0, total_weight)
-        cumulative_weight = 0.0
-        selected_index = 0
-        for index, weight in enumerate(remaining_weights):
-            cumulative_weight += weight
-            if threshold <= cumulative_weight:
-                selected_index = index
-                break
-        else:
-            selected_index = len(pool) - 1
-        picked.append(pool.pop(selected_index))
-        remaining_weights.pop(selected_index)
-    return picked
-
-
-async def _update_flags(conn: aiosqlite.Connection, payload: FlagIn) -> None:
-    # Only touch the provided fields; an existing row is updated in place so
-    # unset flags keep their value. Insert (with defaults) only when absent.
-    sets: list[str] = []
-    params: list[object] = []
-    if payload.favorite is not None:
-        sets.append("favorite = ?")
-        params.append(int(payload.favorite))
-    if payload.blocked is not None:
-        sets.append("blocked = ?")
-        params.append(int(payload.blocked))
-    params.append(payload.video_id)
-    upd = await conn.execute(
-        f"UPDATE user_flags SET {', '.join(sets)}, "
-        "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE video_id = ?",
-        params,
-    )
-    if upd.rowcount == 0:
-        await conn.execute(
-            "INSERT INTO user_flags (video_id, favorite, blocked, updated_at) "
-            "VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
-            (
-                payload.video_id,
-                int(payload.favorite or False),
-                int(payload.blocked or False),
-            ),
-        )
-
-
-@flag_router.post("/api/flags")
-async def set_flags(payload: FlagIn, request: Request) -> dict[str, bool]:
-    conn: aiosqlite.Connection = request.app.state.conn
-    if payload.favorite is None and payload.blocked is None:
-        raise HTTPException(status_code=400, detail="Nothing to update")
-
-    async with conn.execute("SELECT 1 FROM videos WHERE id = ?", (payload.video_id,)) as cur:
-        if await cur.fetchone() is None:
-            raise HTTPException(status_code=404, detail="Unknown video_id")
-
-    await _update_flags(conn, payload)
-    await conn.commit()
-    async with conn.execute(
-        "SELECT favorite, blocked FROM user_flags WHERE video_id = ?", (payload.video_id,)
-    ) as cur:
-        row = await cur.fetchone()
-    return {"favorite": bool(row["favorite"]), "blocked": bool(row["blocked"])}
-
-
-@flag_router.get("/api/blocked")
-async def list_blocked(request: Request) -> list[dict[str, str]]:
-    conn: aiosqlite.Connection = request.app.state.conn
-    sql = (
-        "SELECT v.id, v.filename FROM videos v "
-        "JOIN user_flags f ON f.video_id = v.id "
-        "WHERE COALESCE(f.blocked, 0) = 1 AND v.removed = 0 ORDER BY v.filename"
-    )
-    async with conn.execute(sql) as cur:
-        rows = await cur.fetchall()
-    return [{"id": r["id"], "relpath": r["filename"]} for r in rows]
-
-
-def _move_target(root: Path, folder: str, filename: str) -> Path:
-    target_dir = (root / folder).resolve() if folder else root.resolve()
-    if not target_dir.is_relative_to(root.resolve()):
-        raise HTTPException(status_code=400, detail="Invalid folder")
-    return target_dir / filename
-
-
-async def _remap_batches(
-    conn: aiosqlite.Connection, old_id: str, new_id: str
-) -> None:
-    # A move gives the file a new ID; rewrite stored batch lists so the video
-    # stays in its batches instead of silently dropping out of them.
-    async with conn.execute("SELECT date, video_ids FROM daily_batches") as cur:
-        rows = await cur.fetchall()
-    for row in rows:
-        try:
-            ids = json.loads(row["video_ids"])
-        except (TypeError, ValueError):
-            continue
-        if old_id not in ids:
-            continue
-        remapped = [new_id if video_id == old_id else video_id for video_id in ids]
-        await conn.execute(
-            "UPDATE daily_batches SET video_ids = ? WHERE date = ?",
-            (json.dumps(remapped), row["date"]),
-        )
-
-
-async def _move_file(conn: aiosqlite.Connection, request: Request, payload: MoveIn) -> str:
-    root: Path = request.app.state.video_dir
-    async with conn.execute(
-        "SELECT filename, path, type, duration, size, mtime, created_at FROM videos WHERE id = ? AND removed = 0",
-        (payload.video_id,),
-    ) as cur:
-        row = await cur.fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Unknown video_id")
-    folder = payload.folder.strip().strip("/")
-    if folder in ("", ROOT_FOLDER):
-        folder = ""
-    elif "/" in folder or folder.startswith(".") or "\\" in folder:
-        raise HTTPException(status_code=400, detail="Invalid folder name")
-
-    filename = Path(row["filename"]).name
-    source = Path(row["path"])
-    if not source.is_file():
-        source = root / row["filename"]
-    target = _move_target(root, folder, filename)
-    if not target.parent.is_dir():
-        raise HTTPException(status_code=400, detail=f"Folder does not exist: {folder}")
-    if target.exists():
-        raise HTTPException(status_code=409, detail=f"Target already exists: {folder}/{filename}")
-
-    new_rel = f"{folder}/{filename}" if folder else filename
-    new_id = video_id_for(new_rel)
-    if new_id != payload.video_id:
-        async with conn.execute("SELECT 1 FROM videos WHERE id = ?", (new_id,)) as cur:
-            if await cur.fetchone() is not None:
-                raise HTTPException(status_code=409, detail="A record for this path already exists")
-
-    shutil.move(str(source), str(target))
-    await conn.execute("PRAGMA defer_foreign_keys = ON")
-    await conn.execute(
-        "UPDATE videos SET id = ?, filename = ?, path = ? WHERE id = ?",
-        (new_id, new_rel, str(target), payload.video_id),
-    )
-    await conn.execute(
-        "UPDATE watch_events SET video_id = ? WHERE video_id = ?", (new_id, payload.video_id)
-    )
-    await conn.execute(
-        "UPDATE user_flags SET video_id = ? WHERE video_id = ?", (new_id, payload.video_id)
-    )
-    if new_id != payload.video_id:
-        await _remap_batches(conn, payload.video_id, new_id)
-    await conn.commit()
-    return new_rel
-
-
-@router.post("/move")
-async def move_video(payload: MoveIn, request: Request) -> dict[str, str]:
-    conn: aiosqlite.Connection = request.app.state.conn
-    new_rel = await _move_file(conn, request, payload)
-    return {"id": video_id_for(new_rel), "relpath": new_rel}
-
-
-@config_router.get("", response_model=ConfigOut)
-async def get_config(request: Request) -> ConfigOut:
-    video_dir: Path = request.app.state.video_dir
-    conn: aiosqlite.Connection = request.app.state.conn
-    videos = await fetch_videos(conn)
-    return ConfigOut(
-        video_dir=str(video_dir),
-        exists=video_dir.is_dir(),
-        video_count=len(videos),
-    )
-
-
-@config_router.post("", response_model=ConfigOut)
-async def update_config(payload: ConfigIn, request: Request) -> ConfigOut:
-    conn: aiosqlite.Connection = request.app.state.conn
-    candidate = Path(payload.video_dir).expanduser()
-    candidate = (candidate if candidate.is_absolute() else Path.cwd() / candidate).resolve()
-    if not candidate.is_dir():
-        raise HTTPException(status_code=400, detail=f"Not a valid directory: {candidate}")
-
-    await set_setting(conn, "video_dir", str(candidate))
-    await sync_directory(request.app, video_dir=candidate)
-    videos = await fetch_videos(conn)
-    return ConfigOut(video_dir=str(candidate), exists=True, video_count=len(videos))

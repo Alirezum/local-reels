@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import batch, media, stats, videos, watch
+from . import batch, config_api, flags, media, move, stats, videos, watch
 from .db import close_connection, get_connection, init_schema
 from .scan import sync_directory
 
@@ -37,9 +37,10 @@ app.add_middleware(
 )
 
 app.include_router(videos.router)
+app.include_router(move.move_router)
 app.include_router(batch.router)
-app.include_router(videos.config_router)
-app.include_router(videos.flag_router)
+app.include_router(config_api.config_router)
+app.include_router(flags.flag_router)
 app.include_router(watch.router)
 app.include_router(stats.router)
 app.include_router(media.router)
