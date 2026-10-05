@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
+
 
 class VideoOut(BaseModel):
     id: str
@@ -76,22 +78,22 @@ class FolderStatOut(BaseModel):
 
 
 class BatchNewIn(BaseModel):
-    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    date: str = Field(pattern=DATE_PATTERN)
     size: int = Field(ge=1, le=500)
     folder: str | None = None
 
 
 class BatchContinueIn(BaseModel):
-    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
-    from_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    date: str = Field(pattern=DATE_PATTERN)
+    from_date: str = Field(pattern=DATE_PATTERN)
 
 
 class BatchAddIn(BaseModel):
-    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    date: str = Field(pattern=DATE_PATTERN)
 
 
 class BatchReplaceIn(BaseModel):
-    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    date: str = Field(pattern=DATE_PATTERN)
     old_id: str
     new_id: str
 

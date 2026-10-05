@@ -16,13 +16,12 @@ import aiosqlite
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from .scan import sync_directory
-from .schemas import BatchAddIn, BatchContinueIn, BatchNewIn, BatchOut, BatchReplaceIn
+from .schemas import DATE_PATTERN, BatchAddIn, BatchContinueIn, BatchNewIn, BatchOut, BatchReplaceIn
 from .videos import fetch_videos
 
 router = APIRouter(prefix="/api/batch", tags=["batch"])
 
-_DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
-_DATE_RE = re.compile(_DATE_PATTERN)
+_DATE_RE = re.compile(DATE_PATTERN)
 
 
 def _check_date(value: str) -> str:
@@ -98,7 +97,7 @@ async def _store_and_render(
 
 @router.get("", response_model=BatchOut)
 async def get_batch(
-    request: Request, date: str = Query(pattern=_DATE_PATTERN)
+    request: Request, date: str = Query(pattern=DATE_PATTERN)
 ) -> BatchOut:
     conn: aiosqlite.Connection = request.app.state.conn
     row = await _require_row(conn, date)
@@ -108,7 +107,7 @@ async def get_batch(
 
 @router.get("/previous", response_model=BatchOut)
 async def get_previous_batch(
-    request: Request, before: str = Query(pattern=_DATE_PATTERN)
+    request: Request, before: str = Query(pattern=DATE_PATTERN)
 ) -> BatchOut:
     conn: aiosqlite.Connection = request.app.state.conn
     async with conn.execute(
