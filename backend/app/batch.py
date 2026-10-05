@@ -45,11 +45,25 @@ async def _read_row(conn: aiosqlite.Connection, date: str) -> aiosqlite.Row | No
         return await cur.fetchone()
 
 
-async def _batch_out(conn: aiosqlite.Connection, row: aiosqlite.Row) -> BatchOut:
+def _parse_ids(row: aiosqlite.Row) -> list[str]:
     try:
         ids = json.loads(row["video_ids"])
     except (TypeError, ValueError):
-        ids = []
+        return []
+    return [video_id for video_id in ids if isinstance(video_id, str)] if isinstance(ids, list) else []
+
+
+async def _require_row(
+    conn: aiosqlite.Connection, date: str, detail: str = "No batch for this date"
+) -> aiosqlite.Row:
+    row = await _read_row(conn, date)
+    if row is None:
+        raise HTTPException(status_code=404, detail=detail)
+    return row
+
+
+async def _batch_out(conn: aiosqlite.Connection, row: aiosqlite.Row) -> BatchOut:
+    ids = _parse_ids(row)
     pool = await fetch_videos(conn, folder=row["folder"])
     by_id = {video.id: video for video in pool}
     return BatchOut(
@@ -73,14 +87,21 @@ async def _store_batch(
     await conn.commit()
 
 
+async def _store_and_render(
+    conn: aiosqlite.Connection, *, date: str, size: int, folder: str | None, ids: list[str]
+) -> BatchOut:
+    await _store_batch(conn, date=date, size=size, folder=folder, ids=ids)
+    row = await _read_row(conn, date)
+    assert row is not None
+    return await _batch_out(conn, row)
+
+
 @router.get("", response_model=BatchOut)
 async def get_batch(
     request: Request, date: str = Query(pattern=_DATE_PATTERN)
 ) -> BatchOut:
     conn: aiosqlite.Connection = request.app.state.conn
-    row = await _read_row(conn, date)
-    if row is None:
-        raise HTTPException(status_code=404, detail="No batch for this date")
+    row = await _require_row(conn, date)
     await sync_directory(request.app)
     return await _batch_out(conn, row)
 
@@ -111,67 +132,53 @@ async def new_batch(payload: BatchNewIn, request: Request) -> BatchOut:
     if not pool:
         raise HTTPException(status_code=400, detail="No videos available for this scope")
     picked = random.sample(pool, min(payload.size, len(pool)))
-    await _store_batch(
+    return await _store_and_render(
         conn, date=payload.date, size=payload.size, folder=folder, ids=[v.id for v in picked]
     )
-    row = await _read_row(conn, payload.date)
-    assert row is not None
-    return await _batch_out(conn, row)
 
 
 @router.post("/continue", response_model=BatchOut)
 async def continue_batch(payload: BatchContinueIn, request: Request) -> BatchOut:
     conn: aiosqlite.Connection = request.app.state.conn
-    source = await _read_row(conn, payload.from_date)
-    if source is None:
-        raise HTTPException(status_code=404, detail="No previous batch")
-    await _store_batch(
+    source = await _require_row(conn, payload.from_date, detail="No previous batch")
+    await sync_directory(request.app)
+    return await _store_and_render(
         conn,
         date=payload.date,
         size=source["size"],
         folder=source["folder"],
-        ids=list(json.loads(source["video_ids"])),
+        ids=_parse_ids(source),
     )
-    await sync_directory(request.app)
-    row = await _read_row(conn, payload.date)
-    assert row is not None
-    return await _batch_out(conn, row)
 
 
 @router.post("/add-random", response_model=BatchOut)
 async def add_random_to_batch(payload: BatchAddIn, request: Request) -> BatchOut:
     conn: aiosqlite.Connection = request.app.state.conn
-    row = await _read_row(conn, payload.date)
-    if row is None:
-        raise HTTPException(status_code=404, detail="No batch for this date")
+    row = await _require_row(conn, payload.date)
     await sync_directory(request.app)
-    ids: list[str] = list(json.loads(row["video_ids"]))
+    ids = _parse_ids(row)
     pool = await fetch_videos(conn, folder=row["folder"])
     candidates = [video for video in pool if video.id not in ids]
     if not candidates:
         raise HTTPException(status_code=400, detail="No more videos to add")
     ids.append(random.choice(candidates).id)
-    await _store_batch(conn, date=row["date"], size=row["size"], folder=row["folder"], ids=ids)
-    updated = await _read_row(conn, payload.date)
-    assert updated is not None
-    return await _batch_out(conn, updated)
+    return await _store_and_render(
+        conn, date=row["date"], size=row["size"], folder=row["folder"], ids=ids
+    )
 
 
 @router.delete("/{date}/{video_id}", response_model=BatchOut)
 async def remove_from_batch(date: str, video_id: str, request: Request) -> BatchOut:
     _check_date(date)
     conn: aiosqlite.Connection = request.app.state.conn
-    row = await _read_row(conn, date)
-    if row is None:
-        raise HTTPException(status_code=404, detail="No batch for this date")
-    ids: list[str] = list(json.loads(row["video_ids"]))
+    row = await _require_row(conn, date)
+    ids = _parse_ids(row)
     if video_id not in ids:
         raise HTTPException(status_code=404, detail="Video is not in this batch")
     ids.remove(video_id)
-    await _store_batch(conn, date=row["date"], size=row["size"], folder=row["folder"], ids=ids)
-    updated = await _read_row(conn, date)
-    assert updated is not None
-    return await _batch_out(conn, updated)
+    return await _store_and_render(
+        conn, date=row["date"], size=row["size"], folder=row["folder"], ids=ids
+    )
 
 
 @router.post("/replace", response_model=BatchOut)
@@ -179,10 +186,8 @@ async def replace_in_batch(payload: BatchReplaceIn, request: Request) -> BatchOu
     """Swap one stored video ID for another (e.g. after moving a file, which
     gives it a new ID), keeping its position in the batch."""
     conn: aiosqlite.Connection = request.app.state.conn
-    row = await _read_row(conn, payload.date)
-    if row is None:
-        raise HTTPException(status_code=404, detail="No batch for this date")
-    ids: list[str] = list(json.loads(row["video_ids"]))
+    row = await _require_row(conn, payload.date)
+    ids = _parse_ids(row)
     if payload.old_id not in ids:
         raise HTTPException(status_code=404, detail="Video is not in this batch")
     async with conn.execute(
@@ -191,8 +196,7 @@ async def replace_in_batch(payload: BatchReplaceIn, request: Request) -> BatchOu
         if await cur.fetchone() is None:
             raise HTTPException(status_code=404, detail="Unknown video_id")
     ids = [payload.new_id if video_id == payload.old_id else video_id for video_id in ids]
-    await _store_batch(conn, date=row["date"], size=row["size"], folder=row["folder"], ids=ids)
-    updated = await _read_row(conn, payload.date)
-    assert updated is not None
     await sync_directory(request.app)
-    return await _batch_out(conn, updated)
+    return await _store_and_render(
+        conn, date=row["date"], size=row["size"], folder=row["folder"], ids=ids
+    )
