@@ -3,8 +3,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import ReelItem from '../components/ReelItem.vue'
 import { api } from '../api.js'
+import { useMediaControls } from '../composables/useMediaControls.js'
+import { useReelObserver } from '../composables/useReelObserver.js'
+import { useTransportClock } from '../composables/useTransportClock.js'
 import { useWatchTracker } from '../composables/useWatchTracker.js'
 import { formatPlaybackTime, keyboardAction } from '../playback.js'
+import { buildMediaUrl, scrollFeedBy, topFolderName } from '../utils/media.js'
 
 const MOUNT_WINDOW = 2 // only active ± this render a real <video>/<img>
 const AHEAD = 8 // queue the next shuffled round when this few slides remain
@@ -25,12 +29,10 @@ const feedEl = ref(null)
 const reelComps = ref([])
 const videos = ref([])
 const activeIndex = ref(0)
-const muted = ref(localStorage.getItem('lr.muted') !== '0')
 const loading = ref(true)
 const loadError = ref('')
 const config = ref(null)
 const brokenIds = new Set()
-const rotations = ref({}) // video id -> degrees, kept for this browser session only
 const folders = ref([])
 const moveMenuOpen = ref(false)
 const moving = ref(false)
@@ -46,16 +48,35 @@ const busy = ref(false)
 const actionError = ref('')
 
 const tracker = useWatchTracker()
-let observer = null
 let loadVersion = 0
 let nextQueueKey = 0
 let disposed = false
 
 const activeVideo = computed(() => videos.value[activeIndex.value] ?? null)
-const transportAvailable = computed(() => !!activeVideo.value && activeVideo.value.type !== 'image')
-const transportTime = ref({ current: 0, duration: NaN })
-const transportPlaying = ref(false)
-let transportTimer = 0
+const {
+  transportTime,
+  transportPlaying,
+  startTransportClock,
+  stopTransportClock,
+  transportAction,
+} = useTransportClock({ reelComps, activeIndex, activeVideo })
+const { muted, rotations, toggleMute, rotationFor, rotateActive, toggleFavorite } =
+  useMediaControls({ videos, activeIndex })
+
+function onObserverIndex(idx) {
+  if (idx !== activeIndex.value) {
+    tracker.setPlaying(false)
+    tracker.setActive(videos.value[idx]?.id ?? null)
+    activeIndex.value = idx
+  }
+}
+
+const { bindObserver, disconnectObserver } = useReelObserver({
+  feedEl,
+  isDisposed: () => disposed,
+  isLoading: () => loading.value,
+  onActiveIndex: onObserverIndex,
+})
 
 const scopeLabel = computed(() => batch.value?.folder || 'All folders')
 const positionLabel = computed(() => {
@@ -63,55 +84,6 @@ const positionLabel = computed(() => {
   if (!videos.value.length || !total) return '0/0'
   return `${(activeIndex.value % total) + 1}/${total}`
 })
-
-function syncTransportClock() {
-  const comp = reelComps.value[activeIndex.value]
-  const video = comp?.videoEl ?? null
-  if (transportAvailable.value && video && Number.isFinite(video.duration)) {
-    transportTime.value = { current: video.currentTime, duration: video.duration }
-    transportPlaying.value = !video.paused && !video.ended
-  } else {
-    transportTime.value = { current: 0, duration: NaN }
-    transportPlaying.value = false
-  }
-}
-
-function startTransportClock() {
-  stopTransportClock()
-  transportTimer = window.setInterval(syncTransportClock, 500)
-}
-
-function stopTransportClock() {
-  if (transportTimer) {
-    window.clearInterval(transportTimer)
-    transportTimer = 0
-  }
-}
-
-function bindObserver() {
-  if (!feedEl.value || disposed) return
-  observer?.disconnect()
-  observer = new IntersectionObserver(
-    (entries) => {
-      if (disposed || loading.value) return
-      let best = null
-      for (const entry of entries) {
-        if (entry.isIntersecting && (!best || entry.intersectionRatio > best.intersectionRatio)) {
-          best = entry
-        }
-      }
-      if (!best) return
-      const idx = Number(best.target.dataset.index)
-      if (!Number.isNaN(idx) && idx !== activeIndex.value) {
-        tracker.setPlaying(false)
-        tracker.setActive(videos.value[idx]?.id ?? null)
-        activeIndex.value = idx
-      }
-    },
-    { root: feedEl.value, threshold: [0.6] },
-  )
-  for (const node of feedEl.value.querySelectorAll('.reel')) observer.observe(node)
-}
 
 function shuffledRound(pool) {
   const usable = pool.filter((v) => !brokenIds.has(v.id))
@@ -190,7 +162,7 @@ async function enterFeed(updated, version) {
   // Render the feed first: bindObserver needs feedEl to exist.
   phase.value = round.length ? 'feed' : 'empty'
   if (!round.length) return
-  observer?.disconnect()
+  disconnectObserver()
   await nextTick()
   if (disposed || version !== loadVersion) return
   bindObserver()
@@ -203,7 +175,7 @@ async function load() {
   loading.value = true
   loadError.value = ''
   phase.value = 'loading'
-  observer?.disconnect()
+  disconnectObserver()
   tracker.setPlaying(false)
   tracker.setActive(null)
   videos.value = []
@@ -379,20 +351,6 @@ function onReelError(video) {
   brokenIds.add(video.id)
 }
 
-async function onFavorite(video) {
-  const next = !video.favorite
-  videos.value.forEach((v) => {
-    if (v.id === video.id) v.favorite = next
-  })
-  try {
-    await api.setFlags(video.id, { favorite: next })
-  } catch {
-    videos.value.forEach((v) => {
-      if (v.id === video.id) v.favorite = !next
-    })
-  }
-}
-
 async function onBlock(video) {
   try {
     await api.setFlags(video.id, { blocked: true })
@@ -415,7 +373,7 @@ async function moveActiveTo(folder) {
   try {
     const moved = await tracker.relocate(oldId, () => api.moveVideo(oldId, folder))
     if (disposed || version !== loadVersion) return
-    const url = `/videos/${moved.relpath.split('/').map(encodeURIComponent).join('/')}`
+    const url = buildMediaUrl(moved.relpath)
     for (const item of videos.value) {
       if (item.id === oldId) Object.assign(item, { id: moved.id, relpath: moved.relpath, url })
     }
@@ -448,32 +406,8 @@ async function moveActiveTo(folder) {
   }
 }
 
-function toggleMute() {
-  muted.value = !muted.value
-  localStorage.setItem('lr.muted', muted.value ? '1' : '0')
-}
-
-function rotationFor(video) {
-  return video ? rotations.value[video.id] || 0 : 0
-}
-
-function rotateActive() {
-  const video = videos.value[activeIndex.value]
-  if (!video) return
-  rotations.value = { ...rotations.value, [video.id]: (rotationFor(video) + 90) % 360 }
-}
-
 function scrollByOne(delta) {
-  const feed = feedEl.value
-  if (feed) feed.scrollBy({ top: delta * feed.clientHeight, behavior: 'smooth' })
-}
-
-function transportAction(action) {
-  if (!transportAvailable.value) return
-  const active = reelComps.value[activeIndex.value]
-  if (action === 'backward') active?.seekBy(-5)
-  else if (action === 'forward') active?.seekBy(5)
-  else if (action === 'toggle') active?.toggle()
+  scrollFeedBy(feedEl, delta)
 }
 
 function onKeydown(ev) {
@@ -497,12 +431,6 @@ function toggleMoveMenu() {
   if (moveMenuOpen.value) loadFolders()
 }
 
-function topFolderName(video) {
-  if (!video) return ''
-  const relpath = video.relpath || ''
-  return relpath.includes('/') ? relpath.split('/')[0] : ''
-}
-
 function onGlobalClick(ev) {
   if (moveMenuOpen.value && !ev.target.closest?.('.move-menu')) moveMenuOpen.value = false
 }
@@ -517,7 +445,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposed = true
   ++loadVersion
-  observer?.disconnect()
+  disconnectObserver()
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('click', onGlobalClick)
   stopTransportClock()
@@ -651,7 +579,7 @@ onBeforeUnmount(() => {
         :disabled="!activeVideo"
         aria-label="Favorite"
         :title="activeVideo?.favorite ? 'Remove from favorites' : 'Add to favorites'"
-        @click="activeVideo && onFavorite(activeVideo)"
+        @click="activeVideo && toggleFavorite(activeVideo)"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" :fill="activeVideo?.favorite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false">
           <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" />
