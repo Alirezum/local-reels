@@ -5,6 +5,7 @@ from __future__ import annotations
 import aiosqlite
 from fastapi import APIRouter, HTTPException, Request
 
+from .db import video_exists
 from .schemas import FlagIn
 
 flag_router = APIRouter(tags=["flags"])
@@ -45,9 +46,8 @@ async def set_flags(payload: FlagIn, request: Request) -> dict[str, bool]:
     if payload.favorite is None and payload.blocked is None:
         raise HTTPException(status_code=400, detail="Nothing to update")
 
-    async with conn.execute("SELECT 1 FROM videos WHERE id = ?", (payload.video_id,)) as cur:
-        if await cur.fetchone() is None:
-            raise HTTPException(status_code=404, detail="Unknown video_id")
+    if not await video_exists(conn, payload.video_id):
+        raise HTTPException(status_code=404, detail="Unknown video_id")
 
     await _update_flags(conn, payload)
     await conn.commit()

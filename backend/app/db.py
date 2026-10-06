@@ -98,6 +98,16 @@ async def get_setting(conn: aiosqlite.Connection, key: str) -> str | None:
     return row["value"] if row else None
 
 
+async def video_exists(
+    conn: aiosqlite.Connection, video_id: str, *, exclude_removed: bool = False
+) -> bool:
+    sql = "SELECT 1 FROM videos WHERE id = ?"
+    if exclude_removed:
+        sql += " AND removed = 0"
+    async with conn.execute(sql, (video_id,)) as cur:
+        return await cur.fetchone() is not None
+
+
 async def set_setting(conn: aiosqlite.Connection, key: str, value: str) -> None:
     await conn.execute(
         "INSERT INTO config (key, value) VALUES (?, ?) "

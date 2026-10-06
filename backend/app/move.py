@@ -9,6 +9,7 @@ from pathlib import Path
 import aiosqlite
 from fastapi import APIRouter, HTTPException, Request
 
+from .db import video_exists
 from .scan import video_id_for
 from .schemas import MoveIn
 from .videos import ROOT_FOLDER
@@ -71,10 +72,8 @@ async def _move_file(conn: aiosqlite.Connection, request: Request, payload: Move
 
     new_rel = f"{folder}/{filename}" if folder else filename
     new_id = video_id_for(new_rel)
-    if new_id != payload.video_id:
-        async with conn.execute("SELECT 1 FROM videos WHERE id = ?", (new_id,)) as cur:
-            if await cur.fetchone() is not None:
-                raise HTTPException(status_code=409, detail="A record for this path already exists")
+    if new_id != payload.video_id and await video_exists(conn, new_id):
+        raise HTTPException(status_code=409, detail="A record for this path already exists")
 
     shutil.move(str(source), str(target))
     await conn.execute("PRAGMA defer_foreign_keys = ON")

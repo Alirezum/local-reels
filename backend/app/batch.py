@@ -15,6 +15,7 @@ import re
 import aiosqlite
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from .db import video_exists
 from .scan import sync_directory
 from .schemas import DATE_PATTERN, BatchAddIn, BatchContinueIn, BatchNewIn, BatchOut, BatchReplaceIn
 from .videos import fetch_videos
@@ -189,11 +190,8 @@ async def replace_in_batch(payload: BatchReplaceIn, request: Request) -> BatchOu
     ids = _parse_ids(row)
     if payload.old_id not in ids:
         raise HTTPException(status_code=404, detail="Video is not in this batch")
-    async with conn.execute(
-        "SELECT 1 FROM videos WHERE id = ? AND removed = 0", (payload.new_id,)
-    ) as cur:
-        if await cur.fetchone() is None:
-            raise HTTPException(status_code=404, detail="Unknown video_id")
+    if not await video_exists(conn, payload.new_id, exclude_removed=True):
+        raise HTTPException(status_code=404, detail="Unknown video_id")
     ids = [payload.new_id if video_id == payload.old_id else video_id for video_id in ids]
     await sync_directory(request.app)
     return await _store_and_render(
