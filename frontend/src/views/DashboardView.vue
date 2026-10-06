@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { RouterLink } from 'vue-router'
 import { Chart } from 'chart.js/auto'
 import { api, formatDuration } from '../api.js'
+import { useStaleRequest } from '../composables/useStaleRequest.js'
 import StatCard from '../components/StatCard.vue'
 import ConfigPanel from '../components/ConfigPanel.vue'
 
@@ -19,10 +20,16 @@ const sections = reactive(Object.fromEntries(
 const pendingUnhide = reactive(new Set())
 const unhideErrors = reactive({})
 const unhideMessage = ref('')
-const requests = { summary: 0, top: 0, activity: 0, folders: 0, hidden: 0 }
+const guards = {
+  summary: useStaleRequest(),
+  top: useStaleRequest(),
+  activity: useStaleRequest(),
+  folders: useStaleRequest(),
+  hidden: useStaleRequest(),
+}
+const modeGuard = useStaleRequest()
 const restoredIds = new Set()
 let disposed = false
-let modeRequest = 0
 const activityRows = computed(() => mode.value === 'weekly' ? weeklyBuckets(daily.value) : daily.value)
 const rangeLoading = computed(() => sections.activity.loading || sections.folders.loading)
 
@@ -190,7 +197,7 @@ function renderChart(key) {
 
 async function loadSection(key) {
   if (disposed) return
-  const request = ++requests[key]
+  const guard = guards[key].begin()
   const days = rangeDays.value
   const state = sections[key]
   destroyChart(key)
@@ -205,7 +212,7 @@ async function loadSection(key) {
     hidden: () => api.blocked(),
   }
   const targets = { summary, top: topVideos, activity: daily, folders: folderStats, hidden: blockedList }
-  const isCurrent = () => !disposed && request === requests[key]
+  const isCurrent = () => !disposed && guard.isCurrent()
   try {
     const result = await loaders[key]()
     if (!isCurrent()) return
@@ -289,10 +296,10 @@ async function unhide(item) {
 async function setMode(m) {
   if (disposed || mode.value === m) return
   mode.value = m
-  const request = ++modeRequest
-  const activityRequest = requests.activity
+  const mode = modeGuard.begin()
+  const activityId = guards.activity.peek()
   await nextTick()
-  if (disposed || request !== modeRequest || activityRequest !== requests.activity) return
+  if (disposed || !mode.isCurrent() || activityId !== guards.activity.peek()) return
   renderChart('activity')
 }
 
@@ -303,6 +310,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposed = true
   stopPoll()
+  for (const guard of [...Object.values(guards), modeGuard]) guard.dispose()
   for (const key of ['activity', 'top', 'folders']) destroyChart(key)
 })
 </script>

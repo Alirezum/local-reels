@@ -1,6 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import { api } from '../api.js'
+import { useStaleRequest } from '../composables/useStaleRequest.js'
 
 const emit = defineEmits(['saved'])
 const inputId = useId()
@@ -15,24 +16,24 @@ const loadError = ref('')
 const invalid = ref(false)
 let edited = false
 let disposed = false
-let requestId = 0
+const guard = useStaleRequest()
 
 async function load() {
   if (disposed || busy.value) return
-  const request = ++requestId
+  const req = guard.begin()
   loading.value = true
   loadError.value = ''
   try {
     const cfg = await api.getConfig()
-    if (disposed || request !== requestId) return
+    if (disposed || !req.isCurrent()) return
     current.value = cfg.video_dir || ''
     loaded.value = true
     if (!edited) videoDir.value = current.value
   } catch (e) {
-    if (disposed || request !== requestId) return
+    if (disposed || !req.isCurrent()) return
     loadError.value = `Could not load the current folder. ${e.message || 'Please try again.'}`
   } finally {
-    if (!disposed && request === requestId) loading.value = false
+    if (!disposed && req.isCurrent()) loading.value = false
   }
 }
 
@@ -51,14 +52,14 @@ async function save() {
     message.value = ''
     return
   }
-  const request = ++requestId
+  const request = guard.begin()
   busy.value = true
   invalid.value = false
   message.value = ''
   isError.value = false
   try {
     const cfg = await api.setConfig(path)
-    if (disposed || request !== requestId) return
+    if (disposed || !request.isCurrent()) return
     current.value = cfg.video_dir || path
     videoDir.value = current.value
     loaded.value = true
@@ -67,18 +68,18 @@ async function save() {
     message.value = `Folder saved. ${cfg.video_count} video${cfg.video_count === 1 ? '' : 's'} found.`
     emit('saved', cfg)
   } catch (e) {
-    if (disposed || request !== requestId) return
+    if (disposed || !request.isCurrent()) return
     message.value = e.message || 'Could not save this folder. Please try again.'
     isError.value = true
   } finally {
-    if (!disposed && request === requestId) busy.value = false
+    if (!disposed && request.isCurrent()) busy.value = false
   }
 }
 
 onMounted(load)
 onBeforeUnmount(() => {
   disposed = true
-  requestId++
+  guard.dispose()
 })
 </script>
 
