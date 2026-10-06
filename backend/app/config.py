@@ -11,9 +11,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _resolve_project_path(value: str) -> Path:
+def resolve_path(value: str, *, base: Path | None = None) -> Path:
+    """Resolve a configured path to an absolute path.
+
+    ``~`` is expanded; absolute paths are used as-is; relative paths join
+    ``base`` (working directory callers pass ``Path.cwd()`` explicitly,
+    settings default to the project root) before resolving.
+    """
     path = Path(value).expanduser()
-    return (path if path.is_absolute() else PROJECT_ROOT / path).resolve()
+    if path.is_absolute():
+        return path.resolve()
+    return ((base if base is not None else PROJECT_ROOT) / path).resolve()
 
 
 class Settings(BaseSettings):
@@ -29,10 +37,10 @@ class Settings(BaseSettings):
     port: int = 8000
 
     def resolved_video_dir(self) -> Path:
-        return _resolve_project_path(self.video_dir)
+        return resolve_path(self.video_dir)
 
     def resolved_db_path(self) -> Path:
-        return _resolve_project_path(self.db_path)
+        return resolve_path(self.db_path)
 
 
 settings = Settings()

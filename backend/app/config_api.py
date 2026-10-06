@@ -7,6 +7,7 @@ from pathlib import Path
 import aiosqlite
 from fastapi import APIRouter, HTTPException, Request
 
+from .config import resolve_path
 from .db import set_setting
 from .scan import sync_directory
 from .schemas import ConfigIn, ConfigOut
@@ -30,8 +31,7 @@ async def get_config(request: Request) -> ConfigOut:
 @config_router.post("", response_model=ConfigOut)
 async def update_config(payload: ConfigIn, request: Request) -> ConfigOut:
     conn: aiosqlite.Connection = request.app.state.conn
-    candidate = Path(payload.video_dir).expanduser()
-    candidate = (candidate if candidate.is_absolute() else Path.cwd() / candidate).resolve()
+    candidate = resolve_path(payload.video_dir, base=Path.cwd())
     if not candidate.is_dir():
         raise HTTPException(status_code=400, detail=f"Not a valid directory: {candidate}")
 

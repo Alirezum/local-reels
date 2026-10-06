@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, TypedDict
 
 import aiosqlite
 
-from .config import settings
+from .config import resolve_path, settings
 from .db import get_setting
 
 if TYPE_CHECKING:
@@ -118,7 +118,7 @@ async def probe_duration(path: Path) -> float:
 
 def resolve_video_dir(override: str | None) -> Path:
     if override:
-        return Path(override).expanduser().resolve()
+        return resolve_path(override, base=Path.cwd())
     return settings.resolved_video_dir()
 
 
