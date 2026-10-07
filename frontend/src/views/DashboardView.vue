@@ -4,6 +4,13 @@ import { RouterLink } from 'vue-router'
 import { Chart } from 'chart.js/auto'
 import { api } from '../api.js'
 import { useStaleRequest } from '../composables/useStaleRequest.js'
+import {
+  AXIS_OPTS,
+  FOLDER_COLORS,
+  groupWeekly,
+  toMinutes,
+  truncateName,
+} from '../utils/charts.js'
 import { formatDuration } from '../utils/format.js'
 import StatCard from '../components/StatCard.vue'
 import ConfigPanel from '../components/ConfigPanel.vue'
@@ -31,7 +38,7 @@ const guards = {
 const modeGuard = useStaleRequest()
 const restoredIds = new Set()
 let disposed = false
-const activityRows = computed(() => mode.value === 'weekly' ? weeklyBuckets(daily.value) : daily.value)
+const activityRows = computed(() => mode.value === 'weekly' ? groupWeekly(daily.value) : daily.value)
 const rangeLoading = computed(() => sections.activity.loading || sections.folders.loading)
 
 let lineChart = null
@@ -46,34 +53,6 @@ const avgPerView = computed(() => {
   return formatDuration(summary.value.total_watch_seconds / summary.value.total_views)
 })
 
-function truncate(name, max = 22) {
-  return name.length > max ? name.slice(0, max - 1) + '…' : name
-}
-
-function weekStart(isoDate) {
-  const d = new Date(isoDate + 'T00:00:00Z')
-  const day = (d.getUTCDay() + 6) % 7
-  d.setUTCDate(d.getUTCDate() - day)
-  return d.toISOString().slice(0, 10)
-}
-
-function weeklyBuckets(rows) {
-  const map = new Map()
-  for (const r of rows) {
-    const key = weekStart(r.date)
-    const cur = map.get(key) || { date: key, watch_seconds: 0, views: 0 }
-    cur.watch_seconds += r.watch_seconds
-    cur.views += r.views
-    map.set(key, cur)
-  }
-  return [...map.values()].sort((a, b) => a.date.localeCompare(b.date))
-}
-
-const axisOpts = {
-  ticks: { color: '#9ca3af', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
-  grid: { color: 'rgba(255,255,255,0.06)' },
-}
-
 function renderLineChart() {
   if (disposed || !lineCanvas.value || !daily.value.length) return
   const rows = activityRows.value
@@ -84,7 +63,7 @@ function renderLineChart() {
       datasets: [
         {
           label: 'Watch time (min)',
-          data: rows.map((r) => Math.round((r.watch_seconds / 60) * 100) / 100),
+          data: rows.map((r) => toMinutes(r.watch_seconds)),
           borderColor: '#fc466b',
           backgroundColor: 'rgba(252,70,107,0.15)',
           fill: true,
@@ -97,7 +76,7 @@ function renderLineChart() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.parsed.y} min` } } },
-      scales: { x: axisOpts, y: { ...axisOpts, beginAtZero: true } },
+      scales: { x: AXIS_OPTS, y: { ...AXIS_OPTS, beginAtZero: true } },
     },
   })
 }
@@ -107,11 +86,11 @@ function renderBarChart() {
   barChart = new Chart(barCanvas.value, {
     type: 'bar',
     data: {
-      labels: topVideos.value.map((v) => truncate(v.filename)),
+      labels: topVideos.value.map((v) => truncateName(v.filename)),
       datasets: [
         {
           label: 'Watch time (min)',
-          data: topVideos.value.map((v) => Math.round((v.watch_seconds / 60) * 100) / 100),
+          data: topVideos.value.map((v) => toMinutes(v.watch_seconds)),
           backgroundColor: 'rgba(131,58,180,0.75)',
           borderRadius: 4,
         },
@@ -123,17 +102,12 @@ function renderBarChart() {
       maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.parsed.x} min` } } },
       scales: {
-        x: { ...axisOpts, beginAtZero: true },
+        x: { ...AXIS_OPTS, beginAtZero: true },
         y: { ticks: { color: '#9ca3af' }, grid: { display: false } },
       },
     },
   })
 }
-
-const FOLDER_COLORS = [
-  '#833ab4', '#fc466b', '#f7b733', '#4cc9f0', '#9b5de5',
-  '#f15bb5', '#00bbf9', '#00f5d4', '#fee440', '#e07a5f',
-]
 
 function renderFolderChart() {
   if (disposed || !folderCanvas.value || !folderStats.value.length) return
@@ -143,7 +117,7 @@ function renderFolderChart() {
       labels: folderStats.value.map((f) => f.folder),
       datasets: [
         {
-          data: folderStats.value.map((f) => Math.round(f.watch_seconds / 6) / 10),
+          data: folderStats.value.map((f) => toMinutes(f.watch_seconds, 1)),
           backgroundColor: folderStats.value.map((_, i) => FOLDER_COLORS[i % FOLDER_COLORS.length]),
           borderColor: '#121216',
           borderWidth: 2,
