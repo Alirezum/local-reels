@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+
 import aiosqlite
 
 from .config import settings
 
 _conn: aiosqlite.Connection | None = None
+_lock = asyncio.Lock()
 
 # `videos.filename` holds the file's POSIX path relative to the video
 # directory (e.g. "clip.mp4" or "trips/paris.mp4"), which makes it unique.
@@ -58,20 +62,26 @@ CREATE TABLE IF NOT EXISTS daily_batches (
 """
 
 
+async def _connect(db_path: Path) -> aiosqlite.Connection:
+    """Open a configured connection without touching the shared singleton."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = await aiosqlite.connect(db_path)
+    try:
+        conn.row_factory = aiosqlite.Row
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await conn.execute("PRAGMA journal_mode = WAL")
+    except BaseException:
+        await conn.close()
+        raise
+    return conn
+
+
 async def get_connection() -> aiosqlite.Connection:
     global _conn
-    if _conn is None:
-        db_path = settings.resolved_db_path()
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        _conn = await aiosqlite.connect(db_path)
-        try:
-            _conn.row_factory = aiosqlite.Row
-            await _conn.execute("PRAGMA foreign_keys = ON")
-            await _conn.execute("PRAGMA journal_mode = WAL")
-        except BaseException:
-            await close_connection()
-            raise
-    return _conn
+    async with _lock:
+        if _conn is None:
+            _conn = await _connect(settings.resolved_db_path())
+        return _conn
 
 
 async def close_connection() -> None:
