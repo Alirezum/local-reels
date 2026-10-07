@@ -8,7 +8,8 @@ import { useMediaControls } from '../composables/useMediaControls.js'
 import { useReelObserver } from '../composables/useReelObserver.js'
 import { useTransportClock } from '../composables/useTransportClock.js'
 import { useWatchTracker } from '../composables/useWatchTracker.js'
-import { formatPlaybackTime, keyboardAction } from '../playback.js'
+import { keyboardAction } from '../playback.js'
+import { formatPlaybackTime } from '../utils/format.js'
 import { buildMediaUrl, scrollFeedBy, topFolderName } from '../utils/media.js'
 
 const BATCH = 25 // slides fetched per request

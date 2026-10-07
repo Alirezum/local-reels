@@ -14,17 +14,6 @@ export function canTrackPlayback(state) {
     && !state.paused && !state.ended && !state.seeking && !state.waiting && state.readyState >= 3)
 }
 
-export function formatPlaybackTime(seconds) {
-  if (!Number.isFinite(seconds) || seconds < 0) return '--:--'
-  const total = Math.floor(seconds)
-  const hours = Math.floor(total / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  const remainder = String(total % 60).padStart(2, '0')
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, '0')}:${remainder}`
-    : `${minutes}:${remainder}`
-}
-
 export function keyboardAction(event) {
   if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null
   const targets = event.composedPath?.() || [event.target]

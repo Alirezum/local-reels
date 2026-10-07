@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canSeek, canTrackPlayback, formatPlaybackTime, keyboardAction, seekTarget } from '../src/playback.js'
+import { canSeek, canTrackPlayback, keyboardAction, seekTarget } from '../src/playback.js'
+import { formatPlaybackTime } from '../src/utils/format.js'
 
 const ready = Object.freeze({
   active: true,

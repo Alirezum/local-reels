@@ -2,8 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { Chart } from 'chart.js/auto'
-import { api, formatDuration } from '../api.js'
+import { api } from '../api.js'
 import { useStaleRequest } from '../composables/useStaleRequest.js'
+import { formatDuration } from '../utils/format.js'
 import StatCard from '../components/StatCard.vue'
 import ConfigPanel from '../components/ConfigPanel.vue'
 

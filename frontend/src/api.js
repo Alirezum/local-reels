@@ -94,13 +94,3 @@ export const api = {
       body: JSON.stringify({ video_dir: videoDir }),
     }).then(handle),
 }
-
-export function formatDuration(seconds) {
-  const s = Math.max(0, Math.round(seconds))
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = s % 60
-  if (h > 0) return `${h}h ${m}m ${sec}s`
-  if (m > 0) return `${m}m ${sec}s`
-  return `${sec}s`
-}
