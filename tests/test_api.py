@@ -164,23 +164,21 @@ def test_random_membership_limits_and_filters(client, library, order):
 
 
 @pytest.mark.parametrize(
-    ("count", "weights", "fraction", "expected", "totals", "shuffles"),
+    ("count", "weights", "keys", "expected", "expovariate_calls", "shuffles"),
     [
-        (0, {}, 0, [], [], 0),
-        (1, {}, 0, ["0"], [1.0], 0),
-        (3, {}, 0, ["0", "1", "2"], [3.0, 2.0, 1.0], 0),
-        (3, {}, 1, ["2", "1", "0"], [3.0, 2.0, 1.0], 0),
-        (3, {}, 2, ["2", "1", "0"], [3.0, 2.0, 1.0], 0),
-        (3, {"0": 0.0, "1": 0.0, "2": 0.0}, 0, ["2", "1", "0"], [], 1),
-        (3, {"0": -3.0}, 0, ["2", "1", "0"], [], 1),
-        (3, {"0": 0.0}, 0, ["0", "1", "2"], [2.0, 2.0, 1.0], 0),
-        (3, {"0": 0.0, "1": 2.0, "2": 0.0}, 1, ["1", "2", "0"], [2.0], 1),
+        (0, {}, [], [], [], 0),
+        (1, {}, [0.5], ["0"], [1.0], 0),
+        (3, {}, [0.3, 0.1, 0.2], ["1", "2", "0"], [1.0, 1.0, 1.0], 0),
+        (3, {"0": 0.0, "1": 0.0, "2": 0.0}, [], ["2", "1", "0"], [], 1),
+        (3, {"0": -3.0}, [0.2, 0.1], ["2", "1", "0"], [1.0, 1.0], 1),
+        (3, {"0": 0.0}, [0.2, 0.1], ["2", "1", "0"], [1.0, 1.0], 1),
+        (3, {"0": 0.0, "1": 2.0, "2": 0.0}, [0.4], ["1", "2", "0"], [2.0], 1),
     ],
 )
 def test_weighted_sampling_edges(
-    sandbox, monkeypatch, count, weights, fraction, expected, totals, shuffles
+    sandbox, monkeypatch, count, weights, keys, expected, expovariate_calls, shuffles
 ):
-    from backend.app import videos
+    from backend.app import weights as weights_mod
     from backend.app.schemas import VideoOut
 
     items = [
@@ -198,18 +196,20 @@ def test_weighted_sampling_edges(
     ]
     original_items = list(items)
     original_weights = dict(weights)
-    uniform = Mock(side_effect=lambda start, total: total * fraction)
+    expovariate = Mock(side_effect=list(keys))
     shuffle = Mock(side_effect=lambda pool: pool.reverse())
-    monkeypatch.setattr(videos.random, "uniform", uniform)
-    monkeypatch.setattr(videos.random, "shuffle", shuffle)
+    monkeypatch.setattr(weights_mod.random, "expovariate", expovariate)
+    monkeypatch.setattr(weights_mod.random, "shuffle", shuffle)
 
-    result = videos.weighted_sample_without_replacement(items, weights)
+    result = weights_mod.weighted_sample_without_replacement(items, weights)
 
     assert [item.id for item in result] == expected
     assert items == original_items
     assert weights == original_weights
     assert result is not items
-    assert [call.args for call in uniform.call_args_list] == [(0, total) for total in totals]
+    assert [call.args for call in expovariate.call_args_list] == [
+        (weight,) for weight in expovariate_calls
+    ]
     assert shuffle.call_count == shuffles
 
 

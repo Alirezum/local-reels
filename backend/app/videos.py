@@ -111,7 +111,7 @@ async def random_videos(
     )
     if order == "weighted":
         weights = await fetch_view_weights(conn)
-        random.shuffle(videos)  # so ties among unseen are shuffled fairly
+        # expovariate keys already mix equal weights uniformly; no pre-shuffle needed.
         videos = weighted_sample_without_replacement(videos, weights)
     else:
         random.shuffle(videos)

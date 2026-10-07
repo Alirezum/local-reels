@@ -43,25 +43,22 @@ async def fetch_view_weights(conn: aiosqlite.Connection) -> dict[str, float]:
 def weighted_sample_without_replacement(
     videos: list[VideoOut], weights: dict[str, float]
 ) -> list[VideoOut]:
-    pool = list(videos)
-    remaining_weights = [weights.get(video.id, DEFAULT_WEIGHT) for video in pool]
-    picked: list[VideoOut] = []
-    while pool:
-        total_weight = sum(remaining_weights)
-        if total_weight <= 0:
-            random.shuffle(pool)
-            picked.extend(pool)
-            break
-        threshold = random.uniform(0, total_weight)
-        cumulative_weight = 0.0
-        selected_index = 0
-        for index, weight in enumerate(remaining_weights):
-            cumulative_weight += weight
-            if threshold <= cumulative_weight:
-                selected_index = index
-                break
+    """Weighted shuffle without replacement in O(n log n) via exponential race.
+
+    Each video draws a key ~ Exp(weight) and keys sort ascending
+    (Efraimidis-Spirakis): higher-weight (less-watched) videos tend to come
+    first while equal weights mix uniformly. Zero/negative weights never win
+    a draw, so they trail in shuffled order.
+    """
+    keyed: list[tuple[float, VideoOut]] = []
+    tail: list[VideoOut] = []
+    for video in videos:
+        weight = weights.get(video.id, DEFAULT_WEIGHT)
+        if weight > 0:
+            keyed.append((random.expovariate(weight), video))
         else:
-            selected_index = len(pool) - 1
-        picked.append(pool.pop(selected_index))
-        remaining_weights.pop(selected_index)
-    return picked
+            tail.append(video)
+    keyed.sort(key=lambda item: item[0])
+    if tail:
+        random.shuffle(tail)
+    return [video for _, video in keyed] + tail
